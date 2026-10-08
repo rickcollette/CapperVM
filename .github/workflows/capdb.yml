@@ -98,5 +98,9 @@ jobs:
           UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0 \
             cmake --build build/capdb -j"$(nproc)"
           export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
-          ctest --test-dir build/capdb --output-on-failure || \
-            ctest --test-dir build/capdb -V
+          # The JVM cannot load an ASan-instrumented library without preloading
+          # ASan, and the release smoke test inherits sanitizer flags and times out.
+          ctest --test-dir build/capdb --output-on-failure \
+            -E 'java_jni_runtime_load_run|capdb_release_artifact_smoke' || \
+            ctest --test-dir build/capdb -V \
+              -E 'java_jni_runtime_load_run|capdb_release_artifact_smoke'
