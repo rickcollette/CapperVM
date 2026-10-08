@@ -67,22 +67,23 @@ func TestResolveInstanceMergesInstanceJSON(t *testing.T) {
 	defer st.Close()
 
 	inst := types.Instance{
-		ID:          "deadbeef",
-		Name:        "hello-quiet-raven",
-		Image:       "hello.cap",
-		ImageID:     "img12345",
-		ImageDigest: "sha256:abc",
-		PID:         123,
-		Status:      types.StatusRunning,
-		CreatedAt:   "2026-06-08T00:01:00Z",
-		StartedAt:   "2026-06-08T00:01:01Z",
-		RootFSPath:  st.Paths.Instances + "/deadbeef/rootfs",
-		Entrypoint:  []string{"/bin/sh"},
-		Args:        []string{"-c", "sleep 3600"},
-		Shell:       "/bin/ash",
-		User:        types.UserConfig{UID: 1000, GID: 1000},
-		RuntimeMode: "qemu",
-		Command:     "/bin/sh -c sleep 3600",
+		ID:                    "deadbeef",
+		Name:                  "hello-quiet-raven",
+		Image:                 "hello.cap",
+		ImageID:               "img12345",
+		ImageDigest:           "sha256:abc",
+		PID:                   123,
+		Status:                types.StatusRunning,
+		CreatedAt:             "2026-06-08T00:01:00Z",
+		StartedAt:             "2026-06-08T00:01:01Z",
+		RootFSPath:            st.Paths.Instances + "/deadbeef/rootfs",
+		Entrypoint:            []string{"/bin/sh"},
+		Args:                  []string{"-c", "sleep 3600"},
+		Shell:                 "/bin/ash",
+		User:                  types.UserConfig{UID: 1000, GID: 1000},
+		RuntimeMode:           "qemu",
+		TerminationProtection: true,
+		Command:               "/bin/sh -c sleep 3600",
 	}
 	if err := st.InsertInstance(inst); err != nil {
 		t.Fatal(err)
@@ -108,6 +109,9 @@ func TestResolveInstanceMergesInstanceJSON(t *testing.T) {
 	}
 	if resolved.RuntimeMode != "qemu" {
 		t.Fatalf("expected runtime mode from instance.json, got %q", resolved.RuntimeMode)
+	}
+	if !resolved.TerminationProtection {
+		t.Fatal("expected termination protection from instance.json")
 	}
 }
 

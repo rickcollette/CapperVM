@@ -174,6 +174,9 @@ func (s *Store) mergeInstanceJSON(inst *types.Instance) *types.Instance {
 	if disk.RuntimeMode != "" {
 		inst.RuntimeMode = disk.RuntimeMode
 	}
+	if disk.TerminationProtection {
+		inst.TerminationProtection = true
+	}
 	if disk.RestartPolicy != "" {
 		inst.RestartPolicy = disk.RestartPolicy
 	}
