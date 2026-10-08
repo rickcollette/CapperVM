@@ -14,7 +14,7 @@ outputs:
 
 > Generated from `internal/api` route registrations by `make docs-api`. Do not edit by hand.
 
-All routes are under `/api/v1` and require [authentication](overview.md) unless listed as public there. Responses use the [standard envelope](overview.md#response-envelope). This deployment registers **542** routes across **84** groups.
+All routes are under `/api/v1` and require [authentication](overview.md) unless listed as public there. Responses use the [standard envelope](overview.md#response-envelope). This deployment registers **556** routes across **84** groups.
 
 ## Groups
 
@@ -59,7 +59,7 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 - [`key-pairs`](#key-pairs) — 4 routes
 - [`kms`](#kms) — 6 routes
 - [`launch-templates`](#launch-templates) — 5 routes
-- [`lb`](#lb) — 10 routes
+- [`lb`](#lb) — 21 routes
 - [`load-balancers`](#load-balancers) — 1 routes
 - [`marketplace`](#marketplace) — 7 routes
 - [`mcp`](#mcp) — 11 routes
@@ -93,14 +93,14 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 - [`service-nodes`](#service-nodes) — 2 routes
 - [`stacks`](#stacks) — 5 routes
 - [`storage`](#storage) — 14 routes
-- [`subnets`](#subnets) — 4 routes
+- [`subnets`](#subnets) — 6 routes
 - [`target-groups`](#target-groups) — 2 routes
 - [`topology`](#topology) — 2 routes
 - [`users`](#users) — 10 routes
 - [`version`](#version) — 1 routes
 - [`vpc-endpoints`](#vpc-endpoints) — 2 routes
 - [`vpc-peerings`](#vpc-peerings) — 2 routes
-- [`vpcs`](#vpcs) — 29 routes
+- [`vpcs`](#vpcs) — 30 routes
 - [`zones`](#zones) — 10 routes
 
 ## accounts
@@ -614,6 +614,17 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `DELETE` | `/api/v1/lb/{name}/backends/{address}` |
 | `GET` | `/api/v1/lb/{name}/listeners` |
 | `POST` | `/api/v1/lb/{name}/listeners` |
+| `DELETE` | `/api/v1/lb/{name}/listeners/{id}` |
+| `GET` | `/api/v1/lb/{name}/listeners/{id}` |
+| `PATCH` | `/api/v1/lb/{name}/listeners/{id}` |
+| `DELETE` | `/api/v1/lb/{name}/listeners/{id}/certificates` |
+| `POST` | `/api/v1/lb/{name}/listeners/{id}/certificates` |
+| `GET` | `/api/v1/lb/{name}/target-groups` |
+| `POST` | `/api/v1/lb/{name}/target-groups` |
+| `DELETE` | `/api/v1/lb/{name}/target-groups/{tgId}` |
+| `GET` | `/api/v1/lb/{name}/target-groups/{tgId}/targets` |
+| `POST` | `/api/v1/lb/{name}/target-groups/{tgId}/targets` |
+| `DELETE` | `/api/v1/lb/{name}/target-groups/{tgId}/targets/{targetId}` |
 
 ## load-balancers
 
@@ -962,10 +973,12 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 
 | Method | Path |
 | --- | --- |
+| `GET` | `/api/v1/subnets/{id}/available-ips` |
 | `DELETE` | `/api/v1/subnets/{subnetId}` |
 | `GET` | `/api/v1/subnets/{subnetId}` |
 | `PATCH` | `/api/v1/subnets/{subnetId}` |
 | `POST` | `/api/v1/subnets/{subnetId}/associate-route-table` |
+| `GET` | `/api/v1/subnets/{subnetId}/dependencies` |
 
 ## target-groups
 
@@ -1027,6 +1040,7 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `PATCH` | `/api/v1/vpcs/{vpc}` |
 | `POST` | `/api/v1/vpcs/{vpc}/copy` |
 | `GET` | `/api/v1/vpcs/{vpc}/dependencies` |
+| `GET` | `/api/v1/vpcs/{vpc}/detail` |
 | `GET` | `/api/v1/vpcs/{vpc}/mobility/jobs` |
 | `GET` | `/api/v1/vpcs/{vpc}/mobility/jobs/{job}` |
 | `POST` | `/api/v1/vpcs/{vpc}/mobility/jobs/{job}/cancel` |
