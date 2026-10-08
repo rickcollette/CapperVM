@@ -15,9 +15,28 @@ permissions:
   contents: write
 
 jobs:
-  aio-release:
+  matrix-aio:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: ubuntu24.04
+            image: ubuntu:24.04
+            suffix: ubuntu24.04-glibc2.39-x86_64
+          - target: debian12
+            image: debian:12
+            suffix: debian12-glibc2.36-x86_64
+          - target: rhel9
+            image: registry.access.redhat.com/ubi9/ubi
+            suffix: rhel9-glibc2.34-x86_64
+          - target: rocky-current
+            image: rockylinux/rockylinux:10
+            suffix: rocky10-glibc-detect-x86_64
+          - target: ubuntu18.04
+            image: ubuntu:18.04
+            suffix: ubuntu18.04-glibc2.27-x86_64
     steps:
       - name: Checkout Capper
         uses: actions/checkout@v4
@@ -29,22 +48,58 @@ jobs:
           path: CapperWeb
           ref: feat/sso-rbac-dual-auth
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.6"
-          cache: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: CapperWeb/package-lock.json
-
-      - name: Install build deps
+      - name: Resolve version
+        id: ver
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake build-essential libssl-dev zlib1g-dev \
-            bubblewrap uidmap qemu-utils genisoimage
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          # Artifacts use base version (0.1.39); tag may be v0.1.39-beta.N
+          RAW="${TAG#v}"
+          BASE="${RAW%%-beta*}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$BASE" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$BASE" > VERSION
+
+      - name: Build platform AIO
+        env:
+          SKIP_TESTS: "1"
+          SKIP_IMAGE: "0"
+          CAPPERWEB_HOST: ${{ github.workspace }}/CapperWeb
+        run: |
+          scripts/build-aio-platform.sh \
+            "${{ matrix.target }}" \
+            "${{ steps.ver.outputs.version }}" \
+            "${{ matrix.image }}" \
+            "${{ matrix.suffix }}"
+
+      - name: Smoke test bundle
+        run: |
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -v "$PWD:/src" \
+            -w /src \
+            "capper-release-${{ matrix.target }}" \
+            packaging/smoke-test.sh \
+            "DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}.tgz"
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aio-${{ matrix.target }}
+          path: |
+            DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}.tgz
+            DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}.tgz.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: matrix-aio
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Capper
+        uses: actions/checkout@v4
 
       - name: Resolve version
         id: ver
@@ -54,32 +109,76 @@ jobs:
           else
             TAG="${GITHUB_REF_NAME}"
           fi
-          VERSION="${TAG#v}"
+          RAW="${TAG#v}"
+          BASE="${RAW%%-beta*}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          printf '%s\n' "$VERSION" > VERSION
+          echo "version=$BASE" >> "$GITHUB_OUTPUT"
 
-      - name: Build AIO bundle
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: DIST/AIO
+          merge-multiple: true
+
+      - name: Build channels.json
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          version = os.environ["VERSION"]
+          out = pathlib.Path("DIST/AIO")
+          assets = sorted(out.glob(f"capper-aio-{version}-*.tgz"))
+          if not assets:
+              raise SystemExit("no platform tarballs found")
+          # Prefer ubuntu24.04 as stable channel pointer when present
+          pick = next((p for p in assets if "ubuntu24.04" in p.name), assets[0])
+          sha = hashlib.sha256(pick.read_bytes()).hexdigest()
+          feed = {
+              "stable": {
+                  "version": version,
+                  "url": f"https://github.com/rickcollette/CapperVM/releases/download/{os.environ['TAG']}/{pick.name}",
+                  "sha256": sha,
+                  "minUpgradeFrom": "0.0.0",
+              }
+          }
+          (out / "channels.json").write_text(json.dumps(feed, indent=2) + "\n")
+          print("channels.json ->", pick.name)
+          PY
         env:
-          BUMP_VERSION: "0"
-          SKIP_TESTS: "1"
-          CAPPERWEB_DIR: ${{ github.workspace }}/CapperWeb
-        run: scripts/build-aio.sh "${{ steps.ver.outputs.version }}"
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: CapperVM ${{ steps.ver.outputs.version }}
+          prerelease: ${{ contains(steps.ver.outputs.tag, '-beta') }}
           body: |
-            CapperVM ${{ steps.ver.outputs.version }} AIO release (linux-amd64).
+            CapperVM ${{ steps.ver.outputs.version }} multi-platform AIO release.
 
-            Artifacts:
-            - `capper-aio-${{ steps.ver.outputs.version }}-linux-amd64.tgz`
-            - `capper-aio-${{ steps.ver.outputs.version }}-linux-amd64.tgz.sha256`
-            - `channels.json`
+            Pick the artifact that matches the target OS / glibc family:
+
+            | Target | Artifact |
+            |--------|----------|
+            | Ubuntu 24.04 x86_64 | `capper-aio-${{ steps.ver.outputs.version }}-ubuntu24.04-glibc2.39-x86_64.tgz` |
+            | Debian 12 x86_64 | `capper-aio-${{ steps.ver.outputs.version }}-debian12-glibc2.36-x86_64.tgz` |
+            | RHEL 9 x86_64 | `capper-aio-${{ steps.ver.outputs.version }}-rhel9-glibc2.34-x86_64.tgz` |
+            | Rocky Linux current x86_64 | `capper-aio-${{ steps.ver.outputs.version }}-rocky10-glibc-detect-x86_64.tgz` |
+            | Ubuntu 18.04 x86_64 | `capper-aio-${{ steps.ver.outputs.version }}-ubuntu18.04-glibc2.27-x86_64.tgz` |
+
+            Install:
+            ```bash
+            sha256sum -c capper-aio-<version>-<platform>.tgz.sha256
+            tar xzf capper-aio-<version>-<platform>.tgz
+            cd capper-aio-<version>-<platform>
+            sudo ./install.sh --check-only
+            sudo ./install.sh --yes
+            sudo capper aio doctor
+            sudo capper aio init --backend capdb
+            sudo capper aio up
+            ```
           files: |
-            DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-linux-amd64.tgz
-            DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-linux-amd64.tgz.sha256
+            DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-*.tgz
+            DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-*.tgz.sha256
             DIST/AIO/channels.json
           fail_on_unmatched_files: true

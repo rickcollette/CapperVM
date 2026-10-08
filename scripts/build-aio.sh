@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# Build, test, and (on success) package the Capper All-In-One bundle for
-# Ubuntu 24.04 (amd64). Output: DIST/AIO/capper-aio-<version>-linux-amd64.tgz
+# Build, test, and (on success) package the Capper All-In-One bundle.
+# Output: DIST/AIO/capper-aio-<version>-<platform>.tgz
 #
 # Usage:
 #   scripts/build-aio.sh [VERSION]
 #
 # Environment overrides:
 #   CAPDB_DIR      CapDB checkout dir (default ./CapDB; cloned via make capdb-fetch)
+#   CAPDB_BUILD    CapDB cmake build dir (default ./build/capdb; matrix uses /tmp)
 #   CAPPERWEB_DIR  CapperWeb checkout for the console (default ../CapperWeb)
 #   SKIP_WEB=1     skip the npm console build (ships no console/)
 #   SKIP_TESTS=1   skip the test gate (build + package only; not recommended)
 #   BUMP_VERSION=1 when no VERSION arg: auto-increment patch in ./VERSION (default 1)
+#   PLATFORM_SUFFIX artifact suffix (default linux-amd64; matrix sets
+#                   ubuntu24.04-glibc2.39-x86_64, debian12-..., etc.)
 set -euo pipefail
 
 # ── Locations ─────────────────────────────────────────────────────────────────
@@ -19,7 +22,7 @@ cd "$ROOT"
 
 CAPDB_DIR="${CAPDB_DIR:-CapDB}"
 CAPPERWEB_DIR="${CAPPERWEB_DIR:-$ROOT/../CapperWeb}"
-BUILD_CAPDB="$ROOT/build/capdb"
+BUILD_CAPDB="${CAPDB_BUILD:-$ROOT/build/capdb}"
 
 VERSION="${1:-}"
 if [ -z "$VERSION" ]; then
@@ -33,7 +36,8 @@ if [ -z "$VERSION" ]; then
   fi
 fi
 
-PKG="capper-aio-${VERSION}-linux-amd64"
+PLATFORM_SUFFIX="${PLATFORM_SUFFIX:-linux-amd64}"
+PKG="capper-aio-${VERSION}-${PLATFORM_SUFFIX}"
 OUT_DIR="$ROOT/DIST/AIO"
 STAGE="$OUT_DIR/stage/$PKG"
 
@@ -66,10 +70,10 @@ BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LDFLAGS="-X capper/internal/version.Version=${VERSION} -X capper/internal/version.Commit=${COMMIT} -X capper/internal/version.BuildDate=${BUILD_DATE}"
 
 say "Building CapDB engine (server + client lib)"
-make capdb
+make capdb CAPDB_DIR="$CAPDB_DIR" CAPDB_BUILD="$BUILD_CAPDB"
 
 say "Building capper (cgo + capdb backend, version $VERSION)"
-make build-capdb CAPPER_VERSION="$VERSION"   # -> bin/capper
+make build-capdb CAPPER_VERSION="$VERSION" CAPDB_DIR="$CAPDB_DIR" CAPDB_BUILD="$BUILD_CAPDB"
 
 say "Building capper-agent and capinit (static, pure-Go, version $VERSION)"
 mkdir -p bin
@@ -152,7 +156,7 @@ else
 fi
 
 cat > "$STAGE/README.md" <<EOF
-# Capper All-In-One — $VERSION (Ubuntu 24.04, amd64)
+# Capper All-In-One — $VERSION ($PLATFORM_SUFFIX)
 
 Single-node Capper: control plane, node agent, and CapDB SQL backend.
 

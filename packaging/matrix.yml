@@ -1,0 +1,31 @@
+targets:
+  ubuntu18.04:
+    image: ubuntu:18.04
+    platform_suffix: ubuntu18.04-glibc2.27-x86_64
+    package_manager: apt
+    glibc: "2.27"
+    openssl_family: "1.1"
+  debian12:
+    image: debian:12
+    platform_suffix: debian12-glibc2.36-x86_64
+    package_manager: apt
+    glibc: "2.36"
+    openssl_family: "3"
+  ubuntu24.04:
+    image: ubuntu:24.04
+    platform_suffix: ubuntu24.04-glibc2.39-x86_64
+    package_manager: apt
+    glibc: "2.39"
+    openssl_family: "3"
+  rocky-current:
+    image: rockylinux/rockylinux:10
+    platform_suffix: rocky10-glibc-detect-x86_64
+    package_manager: dnf
+    glibc: detect
+    openssl_family: detect
+  rhel9:
+    image: registry.access.redhat.com/ubi9/ubi
+    platform_suffix: rhel9-glibc2.34-x86_64
+    package_manager: dnf
+    glibc: "2.34"
+    openssl_family: "3"

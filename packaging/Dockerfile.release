@@ -1,0 +1,14 @@
+ARG BASE_IMAGE=ubuntu:24.04
+FROM ${BASE_IMAGE}
+
+ARG GO_VERSION=1.26.6
+ARG NODE_MAJOR=20
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH=/usr/local/go/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+
+COPY packaging/install-deps.sh /tmp/install-deps.sh
+RUN /bin/sh /tmp/install-deps.sh "${GO_VERSION}" "${NODE_MAJOR}" && rm -f /tmp/install-deps.sh
+
+WORKDIR /src
+ENTRYPOINT ["/src/packaging/entrypoint-build.sh"]
