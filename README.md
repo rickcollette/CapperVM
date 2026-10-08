@@ -7,19 +7,19 @@
 *Compute · Networking · Storage · Identity · Topology · Serverless · Observability*
 *…driven by one control plane, reachable from a CLI, REST API, Go SDK, and Web UI.*
 
-![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=for-the-badge&logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?style=for-the-badge&logo=go&logoColor=white)
 ![Web UI](https://img.shields.io/badge/Web%20UI-React%20%2B%20Vite-61DAFB?style=for-the-badge&logo=react&logoColor=black)
 ![Database](https://img.shields.io/badge/Store-SQLite%20%7C%20CapDB-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
-![Status](https://img.shields.io/badge/status-experimental%20v0-EC4899?style=for-the-badge)
+![Status](https://img.shields.io/badge/status-1.0.1-EC4899?style=for-the-badge)
 
 </div>
 
 ---
 
 > [!WARNING]
-> **Do not run untrusted `.cap` images with Capper v0.** This is experimental
-> software — treat capsule isolation as best-effort, not a security boundary.
+> **Do not run untrusted `.cap` images.** Capsule isolation is best-effort,
+> not a security boundary.
 
 Capper started as a local `.cap` capsule runner and grew into a full platform:
 compute, networking, storage, identity, topology, certificates, observability,
@@ -181,14 +181,19 @@ and version, pushes host metrics, and supervises services.
 By default Capper persists control-plane state in a single embedded **SQLite**
 database (`modernc.org/sqlite`, WAL + busy timeout) — pure-Go, no external process.
 
-For networked, connection-pooled storage it can instead talk to **CapDB** — a
-SQLite fork with a TLS client/server protocol and a native pool, maintained at
-[rickcollette/CapDB](https://github.com/rickcollette/CapDB) and consumed via
-`CAPDB_DIR`. It keeps the SQLite dialect, so no SQL changes are needed.
+For networked, connection-pooled storage it can instead talk to **CapDB 3.7.2**
+— a SQLite fork with a TLS client/server protocol, a native pool, a volume
+store, and WAL replication primitives. The engine is
+[rickcollette/CapDB](https://github.com/rickcollette/CapDB). `make capdb-fetch`
+checks it out at `CAPDB_REF` (default `v3.7.2`) under `./CapDB`. The SQL
+dialect is unchanged.
+
+All-in-one installs still run one co-located `capdb-server` on a `--db-root`
+directory. The bundle also ships the `capdb` shell for online `.backup`.
 
 ```bash
-make capdb-fetch          # clone/update the CapDB engine
-make capdb                # build the client lib + server
+make capdb-fetch          # clone CapDB and detach at CAPDB_REF
+make capdb                # client lib, capdb-server, and the capdb shell
 go build -tags capdb ./cmd/capper
 make test-capdb           # driver conformance suite
 ```

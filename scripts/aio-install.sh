@@ -40,7 +40,7 @@ echo "Staging release $VERSION -> $DEST"
 install -d -m 0755 "$LIB_ROOT"
 rm -rf "$DEST"
 install -d -m 0755 "$DEST/bin"
-for b in capper capper-agent capinit capdb-server; do
+for b in capper capper-agent capinit capdb-server capdb; do
   [ -f "$here/bin/$b" ] && install -m 0755 "$here/bin/$b" "$DEST/bin/$b"
 done
 if [ -d "$here/console" ]; then
@@ -54,7 +54,7 @@ mv -Tf "$LIB_ROOT/current.tmp" "$LIB_ROOT/current"
 
 # Point stable paths through current/.
 install -d -m 0755 "$PREFIX/bin"
-for b in capper capper-agent capinit capdb-server; do
+for b in capper capper-agent capinit capdb-server capdb; do
   [ -f "$LIB_ROOT/current/bin/$b" ] && ln -sfn "$LIB_ROOT/current/bin/$b" "$PREFIX/bin/$b"
 done
 if [ -d "$LIB_ROOT/current/console" ]; then

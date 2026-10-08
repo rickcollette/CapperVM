@@ -10,7 +10,7 @@ Capper supports low-downtime, auto-rollback upgrades for both deployment shapes.
 Every binary is build-stamped; check it with:
 
 ```bash
-capper version            # capper 0.1.0 (commit …, built …, go…, linux/amd64)
+capper version            # capper 1.0.1 (commit …, built …, go…, linux/amd64)
 capper version --json
 curl -s localhost:8080/api/v1/version   # version, commit, schemaVersion, apiVersion
 ```

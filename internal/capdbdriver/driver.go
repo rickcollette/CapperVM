@@ -316,8 +316,8 @@ type result struct {
 	lastID int64
 }
 
-func (r result) LastInsertId() (int64, error)  { return r.lastID, nil }
-func (r result) RowsAffected() (int64, error)   { return r.rows, nil }
+func (r result) LastInsertId() (int64, error) { return r.lastID, nil }
+func (r result) RowsAffected() (int64, error) { return r.rows, nil }
 
 // ---- rows ----
 
@@ -348,6 +348,13 @@ func (r *rows) Next(dest []driver.Value) error {
 		if err := r.ctx.Err(); err != nil {
 			return err
 		}
+	}
+	if r.st == nil {
+		return fmt.Errorf("capdb: rows already closed")
+	}
+	if r.c.h == nil || C.capdb_net_alive(r.c.h) == 0 {
+		r.c.dead.Store(true)
+		return fmt.Errorf("capdb: connection lost (transport error)")
 	}
 	rc := C.capdb_net_step(r.st)
 	switch int(rc) {

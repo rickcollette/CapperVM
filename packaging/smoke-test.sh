@@ -13,6 +13,9 @@ root="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -1)"
 "$root/bin/capper" version
 "$root/bin/capper-agent" --help >/dev/null
 "$root/bin/capinit" --help >/dev/null || true
+test -x "$root/bin/capdb-server"
+test -x "$root/bin/capdb"
+"$root/bin/capdb" -version >/dev/null
 test -f "$root/manifest.json" || { echo "missing manifest.json in $root" >&2; ls -la "$root" >&2; exit 1; }
 test -x "$root/install.sh"
 bash -n "$root/install.sh"

@@ -115,6 +115,7 @@ install -m 0755 bin/capper            "$STAGE/bin/capper"
 install -m 0755 bin/capper-agent      "$STAGE/bin/capper-agent"
 install -m 0755 bin/capinit           "$STAGE/bin/capinit"
 install -m 0755 "$BUILD_CAPDB/capdb-server" "$STAGE/bin/capdb-server"
+install -m 0755 "$BUILD_CAPDB/capdb" "$STAGE/bin/capdb"
 
 if [ -d "$CAPPERWEB_DIR/dist" ] && [ "${SKIP_WEB:-0}" != "1" ]; then
   mkdir -p "$STAGE/console"
@@ -157,15 +158,16 @@ fi
 
 say "Writing manifest"
 CAPDB_COMMIT="$(git -C "$CAPDB_DIR_ABS" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+CAPDB_VERSION="$(tr -d ' \n\r' < "$CAPDB_DIR_ABS/VERSION" 2>/dev/null || echo unknown)"
 CAPPERWEB_COMMIT="not-built"
 if [ -d "$CAPPERWEB_DIR/.git" ] && [ "${SKIP_WEB:-0}" != "1" ]; then
   CAPPERWEB_COMMIT="$(git -C "$CAPPERWEB_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 fi
 GLIBC_VERSION="$({ getconf GNU_LIBC_VERSION 2>/dev/null || true; } | awk '{print $2}')"
 OPENSSL_VERSION="$(openssl version 2>/dev/null || echo unknown)"
-python3 - "$STAGE/manifest.json" "$VERSION" "$PLATFORM_SUFFIX" "$COMMIT" "$BUILD_DATE" "$CAPDB_COMMIT" "$CAPPERWEB_COMMIT" "$GLIBC_VERSION" "$OPENSSL_VERSION" "${BUILD_IMAGE_DIGEST:-}" <<'MANIFEST_PY'
+python3 - "$STAGE/manifest.json" "$VERSION" "$PLATFORM_SUFFIX" "$COMMIT" "$BUILD_DATE" "$CAPDB_COMMIT" "$CAPDB_VERSION" "$CAPPERWEB_COMMIT" "$GLIBC_VERSION" "$OPENSSL_VERSION" "${BUILD_IMAGE_DIGEST:-}" <<'MANIFEST_PY'
 import glob, hashlib, json, os, sys
-path, version, platform, commit, build_date, capdb_commit, web_commit, glibc, openssl, image_digest = sys.argv[1:11]
+path, version, platform, commit, build_date, capdb_commit, capdb_version, web_commit, glibc, openssl, image_digest = sys.argv[1:12]
 root = os.path.dirname(path)
 bins = {}
 for p in glob.glob(os.path.join(root, "bin", "*")):
@@ -182,6 +184,7 @@ manifest = {
     "commit": commit,
     "buildDate": build_date,
     "capdbCommit": capdb_commit,
+    "capdbVersion": capdb_version,
     "capperWebCommit": web_commit,
     "glibcVersion": glibc,
     "opensslVersion": openssl,
@@ -205,8 +208,8 @@ tar xzf $PKG.tgz
 cd $PKG
 sudo ./install.sh
 \`\`\`
-Installs \`capper\`, \`capper-agent\`, \`capinit\`, \`capdb-server\` to
-\`/usr/local/bin\` and the console to \`/opt/capper/console\`.
+Installs \`capper\`, \`capper-agent\`, \`capinit\`, \`capdb-server\`, and the
+\`capdb\` shell to \`/usr/local/bin\` and the console to \`/opt/capper/console\`.
 
 ## Run
 \`\`\`
