@@ -109,7 +109,7 @@ fi
 # ── Package ───────────────────────────────────────────────────────────────────
 say "Packaging $PKG"
 rm -rf "$OUT_DIR/stage"
-mkdir -p "$STAGE/bin"
+mkdir -p "$STAGE/bin" "$STAGE/images"
 
 install -m 0755 bin/capper            "$STAGE/bin/capper"
 install -m 0755 bin/capper-agent      "$STAGE/bin/capper-agent"
@@ -139,9 +139,9 @@ build_sample_image() {
   local work="$OUT_DIR/capwork"
   rm -rf "$work"; mkdir -p "$work/store"
   ./bin/capper --store "$work/store" create "$key" "$dir/capper.json"
-  cp "$work/store/images/$cap" "$STAGE/$cap"
+  cp "$work/store/images/$cap" "$STAGE/images/$cap"
   rm -rf "$work"
-  echo "staged sample image: $cap ($(du -h "$STAGE/$cap" | cut -f1))"
+  echo "staged sample image: $cap ($(du -h "$STAGE/images/$cap" | cut -f1))"
 }
 
 if [ "${SKIP_IMAGE:-0}" = "1" ]; then
@@ -154,6 +154,45 @@ else
     echo "warning: docker not found — skipping alpine.cap and alma.cap sample images" >&2
   fi
 fi
+
+say "Writing manifest"
+CAPDB_COMMIT="$(git -C "$CAPDB_DIR_ABS" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+CAPPERWEB_COMMIT="not-built"
+if [ -d "$CAPPERWEB_DIR/.git" ] && [ "${SKIP_WEB:-0}" != "1" ]; then
+  CAPPERWEB_COMMIT="$(git -C "$CAPPERWEB_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+fi
+GLIBC_VERSION="$({ getconf GNU_LIBC_VERSION 2>/dev/null || true; } | awk '{print $2}')"
+OPENSSL_VERSION="$(openssl version 2>/dev/null || echo unknown)"
+python3 - "$STAGE/manifest.json" "$VERSION" "$PLATFORM_SUFFIX" "$COMMIT" "$BUILD_DATE" "$CAPDB_COMMIT" "$CAPPERWEB_COMMIT" "$GLIBC_VERSION" "$OPENSSL_VERSION" "${BUILD_IMAGE_DIGEST:-}" <<'MANIFEST_PY'
+import glob, hashlib, json, os, sys
+path, version, platform, commit, build_date, capdb_commit, web_commit, glibc, openssl, image_digest = sys.argv[1:11]
+root = os.path.dirname(path)
+bins = {}
+for p in glob.glob(os.path.join(root, "bin", "*")):
+    with open(p, "rb") as f:
+        bins[os.path.basename(p)] = hashlib.sha256(f.read()).hexdigest()
+images = {}
+for p in glob.glob(os.path.join(root, "images", "*.cap")):
+    with open(p, "rb") as f:
+        images[os.path.basename(p)] = {"sha256": hashlib.sha256(f.read()).hexdigest(), "sizeBytes": os.path.getsize(p)}
+manifest = {
+    "version": version,
+    "platform": platform,
+    "arch": "x86_64",
+    "commit": commit,
+    "buildDate": build_date,
+    "capdbCommit": capdb_commit,
+    "capperWebCommit": web_commit,
+    "glibcVersion": glibc,
+    "opensslVersion": openssl,
+    "buildImageDigest": image_digest,
+    "binaries": bins,
+    "images": images,
+}
+with open(path, "w") as f:
+    json.dump(manifest, f, indent=2, sort_keys=True)
+    f.write("\n")
+MANIFEST_PY
 
 cat > "$STAGE/README.md" <<EOF
 # Capper All-In-One — $VERSION ($PLATFORM_SUFFIX)

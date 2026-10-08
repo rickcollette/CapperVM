@@ -77,13 +77,9 @@ jobs:
 
       - name: Smoke test bundle
         run: |
-          docker run --rm \
-            --entrypoint /bin/bash \
-            -v "$PWD:/src" \
-            -w /src \
-            "capper-release-${{ matrix.target }}" \
-            packaging/smoke-test.sh \
+          packaging/smoke-test.sh \
             "DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}.tgz"
+
 
       - name: Upload platform artifacts
         uses: actions/upload-artifact@v4
