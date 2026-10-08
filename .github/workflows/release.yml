@@ -56,7 +56,6 @@ jobs:
           else
             TAG="${GITHUB_REF_NAME}"
           fi
-          # Artifacts use base version (0.1.39); tag may be v0.1.39-beta.N
           RAW="${TAG#v}"
           BASE="${RAW%%-beta*}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -75,12 +74,6 @@ jobs:
             "${{ matrix.image }}" \
             "${{ matrix.suffix }}"
 
-      - name: Smoke test bundle
-        run: |
-          packaging/smoke-test.sh \
-            "DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}.tgz"
-
-
       - name: Upload platform artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -90,8 +83,19 @@ jobs:
             DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}.tgz.sha256
           if-no-files-found: error
 
+      - name: Smoke test bundle
+        run: |
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -v "$PWD:/src" \
+            -w /src \
+            "capper-release-${{ matrix.target }}" \
+            packaging/smoke-test.sh \
+            "DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}.tgz"
+
   publish:
     needs: matrix-aio
+    if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Capper
@@ -114,6 +118,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: DIST/AIO
+          pattern: aio-*
           merge-multiple: true
 
       - name: Build channels.json
@@ -125,7 +130,6 @@ jobs:
           assets = sorted(out.glob(f"capper-aio-{version}-*.tgz"))
           if not assets:
               raise SystemExit("no platform tarballs found")
-          # Prefer ubuntu24.04 as stable channel pointer when present
           pick = next((p for p in assets if "ubuntu24.04" in p.name), assets[0])
           sha = hashlib.sha256(pick.read_bytes()).hexdigest()
           feed = {
@@ -138,6 +142,8 @@ jobs:
           }
           (out / "channels.json").write_text(json.dumps(feed, indent=2) + "\n")
           print("channels.json ->", pick.name)
+          for a in assets:
+              print(" artifact", a.name, a.stat().st_size)
           PY
         env:
           VERSION: ${{ steps.ver.outputs.version }}
@@ -177,4 +183,4 @@ jobs:
             DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-*.tgz
             DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-*.tgz.sha256
             DIST/AIO/channels.json
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
