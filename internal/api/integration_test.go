@@ -120,10 +120,10 @@ func TestE2ETopologyLifecycle(t *testing.T) {
 
 	// Join node
 	code, env = roundTrip(t, srv, "POST", "/api/v1/nodes/join", map[string]any{
-		"token":   joinToken,
-		"name":    "test-node-1",
-		"address": "10.0.0.100",
-		"cpuCount": 4,
+		"token":       joinToken,
+		"name":        "test-node-1",
+		"address":     "10.0.0.100",
+		"cpuCount":    4,
 		"memoryBytes": 8 * 1024 * 1024 * 1024,
 	}, "")
 	if code != http.StatusCreated {
@@ -394,6 +394,33 @@ func TestE2EIPAM(t *testing.T) {
 	ipID, _ := ip["id"].(string)
 	if ip["status"] != "reserved" {
 		t.Errorf("expected reserved, got %v", ip["status"])
+	}
+
+	// Association IDs are distinct from allocation IDs on the public-IP routes.
+	code, env = roundTrip(t, srv, "POST", "/api/v1/public-ips/"+ipID+"/associate", map[string]any{
+		"targetType": "load-balancer", "targetId": "lb-1", "bindingMode": "vip",
+		"protocol": "tcp", "externalPort": 80,
+	}, bearer)
+	if code != http.StatusOK {
+		t.Fatalf("associate: got %d body %v", code, env)
+	}
+	binding, _ := env["data"].(map[string]any)
+	associationID, _ := binding["id"].(string)
+	if associationID == "" {
+		t.Fatalf("association ID missing from response: %v", env)
+	}
+	code, env = roundTrip(t, srv, "POST", "/api/v1/public-ips/"+associationID+"/disassociate", nil, bearer)
+	if code != http.StatusOK {
+		t.Fatalf("disassociate: got %d body %v", code, env)
+	}
+	code, env = roundTrip(t, srv, "GET", "/api/v1/ips/"+ipID, nil, bearer)
+	if code != http.StatusOK {
+		t.Fatalf("get after disassociate: got %d body %v", code, env)
+	}
+	details, _ := env["data"].(map[string]any)
+	ip, _ = details["ip"].(map[string]any)
+	if ip["status"] != "reserved" {
+		t.Errorf("expected reserved after disassociate, got %v", ip["status"])
 	}
 
 	// List reserved addresses.

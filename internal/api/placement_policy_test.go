@@ -6,12 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"capper/internal/store"
 	"capper/internal/vpc"
 )
 
 // policyEnv bundles an authenticated server with a seeded VPC and subnet.
 type policyEnv struct {
 	do       func(method, path, body string) (int, string)
+	store    *store.Store
 	vpcID    string
 	subnetID string
 }
@@ -33,6 +35,7 @@ func newPolicyEnv(t *testing.T) policyEnv {
 			rr := doRequest(t, srv, method, path, body, map[string]string{"Authorization": "Bearer " + bearer})
 			return rr.Code, rr.Body.String()
 		},
+		store:    st,
 		vpcID:    v.ID,
 		subnetID: sub.ID,
 	}
@@ -76,6 +79,52 @@ func TestENIAndNATGatewayPlacementValidation(t *testing.T) {
 
 	expectBadRequest(t, env, "POST", "/api/v1/nat-gateways", `{"subnetId":"`+env.subnetID+`"}`, "vpcId is required")
 	expectBadRequest(t, env, "POST", "/api/v1/nat-gateways", `{"vpcId":"`+env.vpcID+`"}`, "subnetId is required")
+}
+
+func TestENIEndpointsRequireProjectOwnedPlacement(t *testing.T) {
+	env := newPolicyEnv(t)
+	foreignVPC, err := env.store.VPC.CreateVPCExtended(vpc.CreateVPCOptions{
+		Project: "other-project", Name: "foreign-vpc", Slug: "foreign-vpc", CIDR: "10.99.0.0/16",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignSubnet, err := env.store.VPC.CreateSubnetExtended(vpc.CreateSubnetOptions{
+		VPCID: foreignVPC.ID, Name: "foreign-subnet", Slug: "foreign-subnet",
+		CIDR: "10.99.1.0/24", Kind: vpc.SubnetPrivate,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignENI, err := env.store.VPC.CreateENI(foreignVPC.ID, foreignSubnet.ID, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectENI, err := env.store.VPC.CreateENI(env.vpcID, env.subnetID, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{
+		"/api/v1/network-interfaces",
+		"/api/v1/network-interfaces?vpcId=" + foreignVPC.ID,
+		"/api/v1/network-interfaces?subnetId=" + foreignSubnet.ID,
+	} {
+		code, resp := env.do("GET", path, "")
+		if path == "/api/v1/network-interfaces" {
+			if code != http.StatusOK || !strings.Contains(resp, projectENI.ID) || strings.Contains(resp, foreignENI.ID) {
+				t.Fatalf("unfiltered ENI list must return only project-owned ENIs, got %d: %s", code, resp)
+			}
+		} else if code != http.StatusNotFound {
+			t.Fatalf("foreign placement list %s: want 404, got %d: %s", path, code, resp)
+		}
+	}
+
+	code, resp := env.do("POST", "/api/v1/network-interfaces",
+		`{"vpcId":"`+foreignVPC.ID+`","subnetId":"`+foreignSubnet.ID+`"}`)
+	if code != http.StatusBadRequest || !strings.Contains(resp, "not found in project") {
+		t.Fatalf("foreign ENI create: want project ownership rejection, got %d: %s", code, resp)
+	}
 }
 
 func TestStackRequiresSubnets(t *testing.T) {

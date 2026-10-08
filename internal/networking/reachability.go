@@ -67,19 +67,11 @@ func AnalyzeReachabilityWithVPC(req ReachabilityRequest, vpcMgr *vpc.Manager, in
 		}
 	}
 	for _, sgID := range instSGs {
+		path = append(path, fmt.Sprintf("security-group:%s", sgID))
 		rules, err := vpcMgr.ListSGRules(sgID)
 		if err != nil {
 			continue
 		}
-		path = append(path, fmt.Sprintf("security-group:%s", sgID))
-		if len(rules) == 0 {
-			return ReachabilityResult{
-				Allowed:      false,
-				BlockingRule: fmt.Sprintf("security-group %s has no rules; deny by default", sgID),
-				Path:         path,
-			}
-		}
-		allowed := false
 		for _, r := range rules {
 			if r.Direction != vpc.SGIngress {
 				continue
@@ -91,20 +83,16 @@ func AnalyzeReachabilityWithVPC(req ReachabilityRequest, vpcMgr *vpc.Manager, in
 				continue
 			}
 			if r.Action == "allow" {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return ReachabilityResult{
-				Allowed:      false,
-				BlockingRule: fmt.Sprintf("security-group %s denies %s/%d", sgID, proto, port),
-				Path:         path,
+				path = append(path, "network-acl:evaluated", fmt.Sprintf("%s:%s", req.DestinationType, req.DestinationID))
+				return ReachabilityResult{Allowed: true, Path: path}
 			}
 		}
 	}
-	path = append(path, "network-acl:evaluated", fmt.Sprintf("%s:%s", req.DestinationType, req.DestinationID))
-	return ReachabilityResult{Allowed: true, Path: path}
+	return ReachabilityResult{
+		Allowed:      false,
+		BlockingRule: fmt.Sprintf("no attached security group allows %s/%d", proto, port),
+		Path:         path,
+	}
 }
 
 // TopologyGraph is the networking topology API response.

@@ -15,25 +15,54 @@ func (s *Server) handleListENIs(w http.ResponseWriter, r *http.Request) {
 	}
 	vpcID := r.URL.Query().Get("vpcId")
 	subnetID := r.URL.Query().Get("subnetId")
+	if vpcID != "" {
+		v, err := s.ctrl.Store.VPC.GetVPC(vpcID, s.project)
+		if err != nil {
+			writeNotFound(w, "vpc not found")
+			return
+		}
+		vpcID = v.ID
+	}
 	var enis []vpc.ENI
 	var err error
-	if subnetID != "" {
-		enis, err = s.ctrl.Store.VPC.ListENIsBySubnet(subnetID)
+	if vpcID == "" && subnetID == "" {
+		vpcs, listErr := s.ctrl.Store.VPC.ListVPCs(s.project)
+		if listErr != nil {
+			writeInternal(w, listErr)
+			return
+		}
+		enis = make([]vpc.ENI, 0)
+		for _, v := range vpcs {
+			vpcENIs, listErr := s.ctrl.Store.VPC.ListENIs(v.ID)
+			if listErr != nil {
+				writeInternal(w, listErr)
+				return
+			}
+			enis = append(enis, vpcENIs...)
+		}
+	} else if subnetID != "" {
+		subnet, serr := s.ctrl.Store.VPC.GetSubnetByID(subnetID)
+		if serr != nil {
+			writeNotFound(w, "subnet not found")
+			return
+		}
+		if vpcID != "" && subnet.VPCID != vpcID {
+			writeBadRequest(w, fmt.Errorf("subnet %s is not in vpc %s", subnetID, vpcID))
+			return
+		}
+		if vpcID == "" {
+			if _, err := s.ctrl.Store.VPC.GetVPC(subnet.VPCID, s.project); err != nil {
+				writeNotFound(w, "subnet not found")
+				return
+			}
+		}
+		enis, err = s.ctrl.Store.VPC.ListENIsBySubnet(subnet.ID)
 	} else {
 		enis, err = s.ctrl.Store.VPC.ListENIs(vpcID)
 	}
 	if err != nil {
 		writeInternal(w, err)
 		return
-	}
-	if vpcID != "" && subnetID != "" {
-		filtered := enis[:0]
-		for _, e := range enis {
-			if e.VPCID == vpcID {
-				filtered = append(filtered, e)
-			}
-		}
-		enis = filtered
 	}
 	writeData(w, enis, nil)
 }
@@ -68,6 +97,10 @@ func (s *Server) handleCreateENI(w http.ResponseWriter, r *http.Request) {
 	}
 	if sub.VPCID != req.VPCID {
 		writeBadRequest(w, fmt.Errorf("subnet %s is not in vpc %s", req.SubnetID, req.VPCID))
+		return
+	}
+	if _, err := s.ctrl.Store.VPC.GetVPC(req.VPCID, s.project); err != nil {
+		writeBadRequest(w, fmt.Errorf("vpc %s not found in project", req.VPCID))
 		return
 	}
 	eni, err := s.ctrl.Store.VPC.CreateENI(req.VPCID, req.SubnetID, req.SGIDs, req.PrivateIP)

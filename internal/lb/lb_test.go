@@ -115,6 +115,35 @@ func TestLBCreateListDelete(t *testing.T) {
 	}
 }
 
+func TestLBDeletePropagatesDependentFailure(t *testing.T) {
+	db := openTestDB(t)
+	m := NewManager(NewStore(db))
+	lb, err := m.Create("delete-failure", "project", "", ":80", ModeTCP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AddBackend(lb.ID, "project", "10.0.0.1:8080"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TRIGGER fail_lb_backend_delete
+		BEFORE DELETE ON lb_backends BEGIN SELECT RAISE(ABORT, 'backend delete failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Delete(lb.ID, "project"); err == nil {
+		t.Fatal("expected dependent deletion error")
+	}
+	if _, err := m.Store().Get(lb.ID, "project"); err != nil {
+		t.Fatalf("load balancer was deleted despite dependent failure: %v", err)
+	}
+	backends, err := m.ListBackends(lb.ID, "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backends) != 1 {
+		t.Fatalf("dependent state was not preserved: got %d backends", len(backends))
+	}
+}
+
 // TestLBAddRemoveBackend exercises the backend management path.
 func TestLBAddRemoveBackend(t *testing.T) {
 	db := openTestDB(t)

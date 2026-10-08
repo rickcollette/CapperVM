@@ -216,29 +216,27 @@ func (s *Store) SetVIP(id, vip, routableIPID string) error {
 }
 
 func (s *Store) Delete(nameOrID, project string) error {
-	lb, gerr := s.Get(nameOrID, project)
-	var res sql.Result
-	var err error
-	if project == "" {
-		res, err = s.db.Exec(`DELETE FROM lb_load_balancers WHERE id=? OR name=?`, nameOrID, nameOrID)
-	} else {
-		res, err = s.db.Exec(`DELETE FROM lb_load_balancers WHERE (id=? OR name=?) AND project=?`,
-			nameOrID, nameOrID, project)
-	}
+	lb, err := s.Get(nameOrID, project)
 	if err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("lb %q not found", nameOrID)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
 	}
-	if gerr == nil {
-		_, _ = s.db.Exec(`DELETE FROM lb_backends WHERE lb_id=?`, lb.ID)
-		_, _ = s.db.Exec(`DELETE FROM lb_target_group_targets WHERE target_group_id IN (SELECT id FROM lb_target_groups WHERE load_balancer_id=?)`, lb.ID)
-		_, _ = s.db.Exec(`DELETE FROM lb_listeners WHERE load_balancer_id=?`, lb.ID)
-		_, _ = s.db.Exec(`DELETE FROM lb_target_groups WHERE load_balancer_id=?`, lb.ID)
+	defer tx.Rollback()
+	for _, query := range []string{
+		`DELETE FROM lb_target_group_targets WHERE target_group_id IN (SELECT id FROM lb_target_groups WHERE load_balancer_id=?)`,
+		`DELETE FROM lb_backends WHERE lb_id=?`,
+		`DELETE FROM lb_listeners WHERE load_balancer_id=?`,
+		`DELETE FROM lb_target_groups WHERE load_balancer_id=?`,
+		`DELETE FROM lb_load_balancers WHERE id=?`,
+	} {
+		if _, err := tx.Exec(query, lb.ID); err != nil {
+			return err
+		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *Store) AddBackend(lbID, address string) (Backend, error) {

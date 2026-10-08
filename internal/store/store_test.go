@@ -81,6 +81,7 @@ func TestResolveInstanceMergesInstanceJSON(t *testing.T) {
 		Args:        []string{"-c", "sleep 3600"},
 		Shell:       "/bin/ash",
 		User:        types.UserConfig{UID: 1000, GID: 1000},
+		RuntimeMode: "qemu",
 		Command:     "/bin/sh -c sleep 3600",
 	}
 	if err := st.InsertInstance(inst); err != nil {
@@ -104,6 +105,9 @@ func TestResolveInstanceMergesInstanceJSON(t *testing.T) {
 	}
 	if resolved.User.UID != 1000 || resolved.User.GID != 1000 {
 		t.Fatalf("expected user from instance.json, got %#v", resolved.User)
+	}
+	if resolved.RuntimeMode != "qemu" {
+		t.Fatalf("expected runtime mode from instance.json, got %q", resolved.RuntimeMode)
 	}
 }
 

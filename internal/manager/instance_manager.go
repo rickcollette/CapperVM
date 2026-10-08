@@ -262,12 +262,28 @@ func (m InstanceManager) Run(imageName string, resources types.ResourceOverrides
 	_ = m.Store.Billing.RecordUsage(project, "instance", id, "count", 1)
 
 	rt := m.resolveRuntime(inst.RuntimeMode)
-	if inst.RuntimeMode == runtime.ModeQEMU && opts.Network != nil && opts.Network.Bridge != "" {
+	if inst.RuntimeMode == runtime.ModeQEMU && opts.Network != nil {
 		tapName := network.TAPName(id)
-		if terr := network.CreateTAPOnBridge(opts.Network.Bridge, tapName); terr != nil {
-			fmt.Fprintf(os.Stderr, "instance %s: create qemu tap: %v\n", id, terr)
-		} else {
-			_ = network.WriteTAPName(instDir, tapName)
+		if opts.Network.Bridge == "" {
+			err = fmt.Errorf("create qemu tap: network bridge is required")
+		} else if terr := network.CreateTAPOnBridge(opts.Network.Bridge, tapName); terr != nil {
+			err = fmt.Errorf("create qemu tap: %w", terr)
+		} else if terr := network.WriteTAPName(instDir, tapName); terr != nil {
+			err = fmt.Errorf("write qemu tap name: %w", terr)
+		}
+		if err != nil {
+			_ = network.DeleteTAP(tapName)
+			if startNetNS != "" {
+				_ = network.TeardownInstanceNetNS(id)
+				hostVeth, _ := network.VethNames(id)
+				_ = network.DeleteVeth(hostVeth)
+				_ = network.ReleaseIP(m.Store.Networks, inst.NetworkID, id)
+			}
+			inst.Status = types.StatusFailed
+			_ = m.Store.UpdateInstance(inst)
+			_ = m.Store.WriteInstanceJSON(inst)
+			_ = os.RemoveAll(instDir)
+			return nil, err
 		}
 	}
 	pid, err := rt.Start(id, instDir, loaded.Manifest, runtime.StartOptions{NetNS: startNetNS})
@@ -345,7 +361,7 @@ func (m InstanceManager) Remove(ref string) error {
 	if err := m.Refresh(inst); err != nil {
 		return err
 	}
-if inst.TerminationProtection {
+	if inst.TerminationProtection {
 		return fmt.Errorf("instance has termination protection enabled")
 	}
 	if inst.Status == types.StatusRunning {

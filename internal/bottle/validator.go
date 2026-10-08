@@ -19,6 +19,9 @@ func ValidateSpec(spec BottleSpec, params map[string]string) []string {
 	if spec.Metadata.Version == "" {
 		errs = append(errs, "metadata.version is required")
 	}
+	if len(spec.Spec.Resources.Networks) > 0 {
+		errs = append(errs, "resources.networks is no longer supported; migrate services to VPC subnet placement and remove service network references")
+	}
 
 	// Validate required parameters.
 	for key, pspec := range spec.Spec.Parameters {

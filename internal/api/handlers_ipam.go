@@ -214,6 +214,18 @@ func (s *Server) handleDetachIP(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, err)
 		return
 	}
+	if associationID := r.PathValue("associationId"); associationID != "" {
+		if _, err := s.ipamStore().GetBinding(associationID); err != nil {
+			writeNotFound(w, "association not found")
+			return
+		}
+		if err := s.ipamManager().DetachBinding(associationID); err != nil {
+			writeInternal(w, err)
+			return
+		}
+		writeData(w, map[string]any{"detached": associationID}, nil)
+		return
+	}
 	id := pathIPAllocationID(r)
 	if err := s.ipamManager().Detach(id); err != nil {
 		writeInternal(w, err)

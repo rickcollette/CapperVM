@@ -414,7 +414,7 @@ func (s *Store) ListRealms() ([]Realm, error) {
 		return nil, err
 	}
 	defer rows.Close()
-out := []Realm{}
+	out := []Realm{}
 	for rows.Next() {
 		r, err := scanRealm(rows.Scan)
 		if err != nil {
@@ -498,7 +498,7 @@ func (s *Store) ListRegions(realmID string) ([]Region, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Region
+	out := []Region{}
 	for rows.Next() {
 		r, err := scanRegion(rows.Scan)
 		if err != nil {
@@ -587,7 +587,7 @@ func (s *Store) ListZones(regionID string) ([]Zone, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Zone
+	out := []Zone{}
 	for rows.Next() {
 		z, err := scanZone(rows.Scan)
 		if err != nil {
@@ -705,7 +705,7 @@ func (s *Store) ListNodes(zoneID string) ([]Node, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Node
+	out := []Node{}
 	for rows.Next() {
 		n, err := scanNode(rows.Scan)
 		if err != nil {

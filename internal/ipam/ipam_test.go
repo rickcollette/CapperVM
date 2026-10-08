@@ -119,6 +119,43 @@ func TestAttachConflict(t *testing.T) {
 	}
 }
 
+func TestDetachBindingPreservesOtherAssociations(t *testing.T) {
+	s := newStore(t)
+	mgr := NewManager(s)
+	pool, _, err := mgr.CreatePool(CreatePoolOptions{
+		Pool: RoutableIPPool{Name: "bindings", CIDR: "198.51.100.0/29", Gateway: "198.51.100.1",
+			Usage: []string{UsageLoadBalancer}, AllowAutoAllocate: true, Status: PoolActive},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip, err := mgr.Reserve(ReserveOptions{PoolID: pool.ID, Purpose: UsageLoadBalancer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := mgr.Attach(ip.ID, IPBinding{TargetType: "load-balancer", TargetID: "lb", BindingMode: ModeVIP, Protocol: "tcp", ExternalPort: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.Attach(ip.ID, IPBinding{TargetType: "load-balancer", TargetID: "lb", BindingMode: ModeVIP, Protocol: "tcp", ExternalPort: 443}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.DetachBinding(first.ID); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := s.ListBindings(ip.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetIP(ip.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 1 || got.Status != IPAttached {
+		t.Fatalf("detaching one association removed too much: bindings=%d status=%s", len(bindings), got.Status)
+	}
+}
+
 func TestReservedOnlyPoolRequiresExplicitAddress(t *testing.T) {
 	s := newStore(t)
 	mgr := NewManager(s)
