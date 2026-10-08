@@ -302,9 +302,15 @@ func (s *Store) DeleteUser(nameOrID string) error {
 	// Cascade: revoke the user's role grants, group memberships, and API tokens.
 	// Orphaned tokens are a security hole — they would keep authenticating as the
 	// removed principal.
-	_, _ = s.db.Exec(`DELETE FROM iam_grants WHERE principal_type='user' AND principal_id=?`, u.ID)
-	_, _ = s.db.Exec(`DELETE FROM iam_group_members WHERE user_id=?`, u.ID)
-	_, _ = s.db.Exec(`DELETE FROM iam_tokens WHERE principal_type='user' AND principal_id=?`, u.ID)
+if _, err := s.db.Exec(`DELETE FROM iam_grants WHERE principal_type='user' AND principal_id=?`, u.ID); err != nil {
+		return fmt.Errorf("cannot delete user grants: %w", err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM iam_group_members WHERE user_id=?`, u.ID); err != nil {
+		return fmt.Errorf("cannot delete user group memberships: %w", err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM iam_tokens WHERE principal_type='user' AND principal_id=?`, u.ID); err != nil {
+		return fmt.Errorf("cannot delete user tokens: %w", err)
+	}
 	_, err = s.db.Exec(`DELETE FROM iam_users WHERE id=?`, u.ID)
 	return err
 }
