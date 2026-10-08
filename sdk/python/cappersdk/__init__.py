@@ -13,7 +13,6 @@ Usage::
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-import urllib.request
 import urllib.parse
 import json as _json
 
@@ -118,20 +117,30 @@ class CapperClient:
     # ---- low-level HTTP helpers --------------------------------------------
 
     def _request(self, method: str, path: str, body: Optional[Any] = None) -> Any:
-        url = f"{self._base}/{path}"
-        data = _json.dumps(body).encode() if body is not None else None
+        from urllib.parse import urljoin, urlparse
+
+        try:
+            import requests
+        except ImportError as e:  # pragma: no cover
+            raise ImportError("cappersdk requires the 'requests' package") from e
+
+        base = self._base if "://" in self._base else "https://" + self._base
+        url = urljoin(base.rstrip("/") + "/", path.lstrip("/"))
+        if urlparse(url).scheme not in ("http", "https"):
+            raise APIError(0, f"unsupported URL scheme: {url}")
         headers = {"Accept": "application/json"}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
-        if data is not None:
-            headers["Content-Type"] = "application/json"
-        req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        try:
-            with urllib.request.urlopen(req) as resp:
-                raw = resp.read()
-                return _json.loads(raw) if raw else {}
-        except urllib.error.HTTPError as e:
-            raise APIError(e.code, e.read().decode()) from e
+        kwargs: Dict[str, Any] = {"headers": headers, "timeout": 60}
+        if body is not None:
+            kwargs["json"] = body
+        resp = requests.request(method, url, **kwargs)
+        if resp.status_code >= 400:
+            raise APIError(resp.status_code, resp.text)
+        if not resp.content:
+            return {}
+        return resp.json()
+
 
     def _get(self, path: str) -> Any:
         return self._request("GET", path)

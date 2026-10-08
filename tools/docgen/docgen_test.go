@@ -32,7 +32,7 @@ func TestExtractAPIRoutes(t *testing.T) {
 	want := map[string]bool{
 		"GET /api/v1/instances":    false,
 		"GET /api/v1/iam/users":    false,
-		"GET /api/v1/networks":     false,
+		"GET /api/v1/vpcs":         false,
 		"GET /api/v1/storage/volumes": false,
 	}
 	for _, r := range routes {

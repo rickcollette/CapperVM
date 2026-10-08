@@ -56,11 +56,12 @@ over-committing a pool is refused. A background reconciler refreshes each pool's
 capacity from its backend and marks a pool **degraded** if its mountpoint or
 volume group disappears.
 
-**Auto-drawing instance disks.** Set a **default instance disk pool** (Admin →
-Storage, or `storage.instance_pool`). New instance disks are then drawn from that
-pool — a size-capped image on a directory pool, or a logical volume on an LVM
-pool — and released back when the instance is deleted. Unset means instance disks
-live under the control-plane store path (legacy behavior).
+**Auto-drawing instance disks.** A **default instance disk pool** is **required**
+for instance launch and block volume creation (Admin → Storage, or
+`storage.instance_pool`). New instance disks are drawn from that pool — a
+size-capped image on a directory pool, or a logical volume on an LVM pool — and
+released when the instance is deleted. AIO deploy registers and pins a default
+pool automatically; manual installs must configure one before launching workloads.
 
 Disk states: `unallocated` (no filesystem, mount, or partitions — safe to use),
 `pool-member` (backs a registered pool), `in-use-by-host` (mounted or

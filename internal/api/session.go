@@ -54,6 +54,7 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 			Name:     csrfCookieName,
 			Value:    csrf,
 			Path:     "/",
+			HttpOnly: true,
 			Secure:   true,
 			SameSite: http.SameSiteStrictMode,
 			MaxAge:   int(ttl.Seconds()),
@@ -64,8 +65,8 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 			"csrfToken":     csrf,
 		}, nil)
 	case http.MethodDelete:
-		http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/", MaxAge: -1})
-		http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Path: "/", MaxAge: -1})
+		http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+		http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -107,7 +108,7 @@ func (s *Server) issueSession(w http.ResponseWriter, pt, pid string, ttl time.Du
 	})
 	http.SetCookie(w, &http.Cookie{
 		Name: csrfCookieName, Value: csrf, Path: "/",
-		Secure: true, SameSite: http.SameSiteStrictMode, MaxAge: int(ttl.Seconds()),
+		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, MaxAge: int(ttl.Seconds()),
 	})
 	return csrf, nil
 }

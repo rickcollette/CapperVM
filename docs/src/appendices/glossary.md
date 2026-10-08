@@ -3,7 +3,7 @@ title: "Glossary"
 description: "Definitions of Capper terms and subsystems."
 owner: "docs"
 status: "stable"
-reviewed: "2026-06-12"
+reviewed: "2026-06-19"
 outputs:
   - markdown
   - web
@@ -24,8 +24,10 @@ outputs:
 | **Compute group** | A managed set of instances kept at a desired size. |
 | **Control plane** | The authoritative daemon that owns state, serves the API, and runs reconcilers. |
 | **CSD** | Capper shared/replicated volumes mountable across nodes. |
+| **ENI** | Elastic network interface — VPC attachment with private IP(s) and security groups. |
 | **Elastic / public IP** | A routable IP allocated from a pool and bound to an instance or load balancer (IPAM). |
 | **Guardrail** | An org-level deny that overrides account policy and root (governance). |
+| **Host storage pool** | Admin-registered physical capacity (directory or LVM) backing instance disks and block volumes. |
 | **IAM** | Identity and access management: users, groups, roles, policies, tokens. |
 | **Ingress** | Host/path routing in front of services. |
 | **KMS** | Key management: envelope encryption of data keys under a master key. |
@@ -42,6 +44,7 @@ outputs:
 | **Service account** | A non-human IAM principal. |
 | **Stack** | A declared set of resources applied/destroyed as a unit (IaC). |
 | **Store** | The single database (with ~45 sub-stores) holding all control-plane state. |
+| **Subnet** | A CIDR slice inside a VPC; instances and load balancers require a subnet ID. |
 | **VPC** | An isolated virtual private cloud of subnets with routing. |
 | **VPC Mobility** | Migrating a VPC's workloads across realms/regions (plan → approve → execute → cutover). |
 

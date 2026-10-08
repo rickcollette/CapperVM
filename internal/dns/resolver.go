@@ -3,7 +3,8 @@ package dns
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"crypto/rand"
+	"math/big"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -241,7 +242,7 @@ func weightedSelect(recs []Record) Record {
 		}
 		total += w
 	}
-	pick := rand.Intn(total) //nolint:gosec
+	nBig, _ := rand.Int(rand.Reader, big.NewInt(int64(total))); pick := int(nBig.Int64())
 	cumulative := 0
 	for _, rec := range recs {
 		w := rec.Weight

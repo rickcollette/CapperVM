@@ -322,7 +322,7 @@ func (s *Server) handleAttachCertToLB(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "certificate manager not initialized")
 		return
 	}
-	lbID := r.PathValue("lb")
+	lbName := r.PathValue("lb")
 	var req struct {
 		CertID   string `json:"certId"`
 		Hostname string `json:"hostname"`
@@ -331,8 +331,17 @@ func (s *Server) handleAttachCertToLB(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	if err := s.ctrl.CertMgr.AttachToLoadBalancer(r.Context(), req.CertID, lbID, req.Hostname); err != nil {
+	lbRec, err := s.ctrl.Store.LB.Get(lbName, s.project)
+	if err != nil {
+		writeNotFound(w, "lb not found")
+		return
+	}
+	if err := s.ctrl.CertMgr.AttachToLoadBalancer(r.Context(), req.CertID, lbRec.ID, req.Hostname); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.ctrl.Store.LB.SetTLSCert(lbName, s.project, req.CertID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -343,10 +352,19 @@ func (s *Server) handleDetachCertFromLB(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusServiceUnavailable, "certificate manager not initialized")
 		return
 	}
-	lbID := r.PathValue("lb")
+	lbName := r.PathValue("lb")
 	certID := r.PathValue("cert")
 	hostname := r.URL.Query().Get("hostname")
-	if err := s.ctrl.CertMgr.DetachFromLoadBalancer(r.Context(), certID, lbID, hostname); err != nil {
+	lbRec, err := s.ctrl.Store.LB.Get(lbName, s.project)
+	if err != nil {
+		writeNotFound(w, "lb not found")
+		return
+	}
+	if err := s.ctrl.CertMgr.DetachFromLoadBalancer(r.Context(), certID, lbRec.ID, hostname); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.ctrl.Store.LB.ClearTLSCert(lbName, s.project); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

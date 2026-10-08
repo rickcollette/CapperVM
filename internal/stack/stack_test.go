@@ -58,10 +58,9 @@ func writeTemplate(t *testing.T, tmpl stack.StackTemplate) string {
 
 func minimalTemplate(name string) stack.StackTemplate {
 	return stack.StackTemplate{
-		Name:     name,
-		Networks: []stack.NetworkSpec{{Name: "app-net", Mode: "nat", Subnet: "auto"}},
+		Name: name,
 		Instances: []stack.InstanceSpec{
-			{Name: "web", Image: "nginx.cap", Network: "app-net"},
+			{Name: "web", Image: "nginx.cap", SubnetID: "sub-1"},
 		},
 	}
 }
@@ -75,8 +74,8 @@ func TestLoadTemplate_Valid(t *testing.T) {
 	if tmpl.Name != "my-stack" {
 		t.Errorf("name: %q", tmpl.Name)
 	}
-	if len(tmpl.Networks) != 1 {
-		t.Errorf("networks: got %d, want 1", len(tmpl.Networks))
+	if len(tmpl.Instances) != 1 {
+		t.Errorf("instances: got %d, want 1", len(tmpl.Instances))
 	}
 }
 
@@ -111,13 +110,13 @@ func TestPlan_ReturnsActions(t *testing.T) {
 	if len(ops) == 0 {
 		t.Error("expected at least one plan op")
 	}
-	// Should have a create op for the network and instance.
+	// Should have a create op for the instance.
 	types := map[string]bool{}
 	for _, op := range ops {
 		types[op.Type] = true
 	}
-	if !types["network"] {
-		t.Error("expected network op in plan")
+	if types["network"] {
+		t.Error("legacy network ops are no longer planned")
 	}
 	if !types["instance"] {
 		t.Error("expected instance op in plan")

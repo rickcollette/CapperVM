@@ -39,6 +39,7 @@ coverage.html
 
 # Deploy secrets (Google OAuth client) — track the tooling, never the secret.
 deploy/oauth2.env
+deploy/local.env
 
 # apk.static workdir (alpine image build)
 /examples/alpine/apktools/
@@ -46,3 +47,6 @@ deploy/oauth2.env
 # AlmaLinux image build artifacts
 /examples/alma/rootfs/
 /examples/alma/downloads/
+
+# Local security scan outputs
+.security-reports/

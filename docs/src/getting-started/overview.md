@@ -26,7 +26,8 @@ interfaces.
 | Area | What it provides |
 | --- | --- |
 | **Compute** | `.cap` capsule instances (bwrap/chroot/crun/runc), images, templates, instance types, GPU inventory, compute groups + autoscale |
-| **Networking** | virtual networks, VPCs + subnets, route tables, security groups, firewalls (nftables), load balancers, DNS, ingress, public IPAM / elastic IPs |
+| **Networking** | VPCs + subnets (required for instances/LBs), ENIs, route tables, security groups, firewalls, load balancers, DNS, ingress, public IPAM |
+| **Storage** | admin host storage pools (required for instance/volume disks), block volumes, S3 buckets, CSD, backups |
 | **Storage** | block volumes, an S3-compatible object store, snapshots, CSD shared/replicated volumes, backups |
 | **Multi-tenancy** | organizations → accounts → projects, IAM (users/groups/roles/policies), managed policies, assume-role, quotas, governance, audit |
 | **Topology** | realms → regions → zones → nodes, node pools, service roles, the `capper-agent` node daemon, a placement scheduler |

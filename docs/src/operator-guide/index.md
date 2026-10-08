@@ -3,7 +3,7 @@ title: "Operator guide"
 description: "Day-to-day operation of every Capper subsystem."
 owner: "docs"
 status: "stable"
-reviewed: "2026-06-12"
+reviewed: "2026-06-19"
 outputs:
   - markdown
   - web
@@ -26,7 +26,8 @@ How to operate each Capper subsystem. New here? Start with the
 
 ## Networking
 
-- [Manage networks & VPCs](manage-networks.md) — networks, VPCs, subnets, routing.
+- [Manage VPCs & networking](manage-networks.md) — VPCs, subnets, ENIs, routing.
+- [Networking dashboard](manage-networks.md) — drift and utilization.
 - [Firewall](firewall.md) — nftables network policy.
 - [Load balancers](load-balancers.md) · [Ingress](ingress.md)
 - [Manage DNS](manage-dns.md) — zones, records, service discovery.
@@ -35,6 +36,7 @@ How to operate each Capper subsystem. New here? Start with the
 
 ## Storage & data
 
+- [Admin section](admin-section.md) — host storage pools, fail2ban, UFW, limits.
 - [Manage storage](manage-storage.md) — volumes, object store, snapshots, CSD.
 - [Manage backups](manage-backups.md) — policies and restore.
 - [Managed databases](managed-databases.md)

@@ -22,6 +22,21 @@ type Instance struct {
 	RestartCount  int            `json:"restartCount,omitempty"`
 	NetworkID     string            `json:"networkId,omitempty"`
 	NetworkIP     string            `json:"networkIp,omitempty"`
+	// VPC networking (AWS-style)
+	VPCID            string            `json:"vpcId,omitempty"`
+	SubnetID         string            `json:"subnetId,omitempty"`
+	PrimaryENIID     string            `json:"primaryEniId,omitempty"`
+	PrivateIPAddress string            `json:"privateIpAddress,omitempty"`
+	PublicIPAddress  string            `json:"publicIpAddress,omitempty"`
+	SecurityGroupIDs []string          `json:"securityGroupIds,omitempty"`
+	InstanceType     string            `json:"instanceType,omitempty"`
+	RuntimeMode      string            `json:"runtimeMode,omitempty"` // auto|bwrap|chroot|crun|runc|lxc|qemu
+	KeyName          string            `json:"keyName,omitempty"`
+	IAMRoleID        string            `json:"iamRoleId,omitempty"`
+	TerminationProtection bool         `json:"terminationProtection,omitempty"`
+	ShutdownBehavior string            `json:"shutdownBehavior,omitempty"`
+	SourceDestCheck  *bool             `json:"sourceDestCheck,omitempty"`
+	Tags             map[string]string `json:"tags,omitempty"`
 	Labels        map[string]string `json:"labels,omitempty"`
 	HealthCheck   *HealthCheck      `json:"healthCheck,omitempty"`
 
@@ -36,11 +51,17 @@ type Instance struct {
 }
 
 const (
-	StatusCreated = "created"
-	StatusRunning = "running"
-	StatusStopped = "stopped"
-	StatusFailed  = "failed"
-	StatusUnknown = "unknown"
+	StatusCreated  = "created"  // legacy; maps to pending
+	StatusPending  = "pending"
+	StatusRunning  = "running"
+	StatusStopping = "stopping"
+	StatusStopped  = "stopped"
+	StatusShutting = "shutting-down"
+	StatusTerminated = "terminated"
+	StatusRebooting = "rebooting"
+	StatusFailed   = "failed"   // legacy; maps to error
+	StatusError    = "error"
+	StatusUnknown  = "unknown"
 )
 
 // PortPublish records a host→container port forwarding rule applied via iptables DNAT.

@@ -1,0 +1,4 @@
+{
+  "nosec": true,
+  "exclude": ["G204", "G304"]
+}

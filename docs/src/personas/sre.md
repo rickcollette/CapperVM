@@ -60,7 +60,7 @@ Segment traffic with isolated networks. Each network has its own CIDR range and
 firewall policy. The Networks page shows connected instances and current traffic
 state.
 
-![Networks](/assets/images/screenshots/03-networks.png)
+![VPCs and subnets](/assets/images/screenshots/03-vpcs.png)
 
 ## Backups
 

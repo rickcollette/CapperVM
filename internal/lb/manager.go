@@ -20,47 +20,38 @@ type proxyRunner interface {
 type InstanceLister func() ([]types.Instance, error)
 
 // NodeHealthChecker returns true if the node hosting an instance is healthy.
-// Injected from topology to avoid circular imports.
 type NodeHealthChecker func(nodeID string) bool
 
+type runningEntry struct {
+	runner proxyRunner
+	spec   ProxySpec
+}
+
 // Manager manages LB records and coordinates running proxies.
-// Call Reconcile from the daemon's reconciler loop to start/stop proxies.
 type Manager struct {
 	store       *Store
 	mu          sync.Mutex
-	running     map[string]proxyRunner // keyed by lb ID
+	running     map[string]runningEntry // keyed by proxy spec key (listener ID or legacy LB ID)
 	certRes     CertResolver
+	acmeHandler ACMEChallengeHandler
 	logDir      string
 	instList    InstanceLister
 	nodeHealthy NodeHealthChecker
 }
 
 func NewManager(s *Store) *Manager {
-	return &Manager{store: s, running: make(map[string]proxyRunner)}
+	return &Manager{store: s, running: make(map[string]runningEntry)}
 }
 
-// SetCertResolver configures the TLS cert resolver used by TLS-terminated proxies.
 func (m *Manager) SetCertResolver(fn CertResolver) { m.certRes = fn }
+func (m *Manager) SetACMEChallengeHandler(fn ACMEChallengeHandler) { m.acmeHandler = fn }
+func (m *Manager) SetLogDir(dir string)                          { m.logDir = dir }
+func (m *Manager) SetInstanceLister(fn InstanceLister)           { m.instList = fn }
+func (m *Manager) SetNodeHealthChecker(fn NodeHealthChecker)     { m.nodeHealthy = fn }
+func (m *Manager) Store() *Store                                 { return m.store }
 
-// SetLogDir sets the directory where LB request logs are written.
-func (m *Manager) SetLogDir(dir string) { m.logDir = dir }
-
-// SetInstanceLister configures the function used to resolve selector-mode backends.
-func (m *Manager) SetInstanceLister(fn InstanceLister) { m.instList = fn }
-
-// SetNodeHealthChecker installs a checker that filters selector-mode backends
-// to only healthy nodes. Pass nil to disable health filtering.
-func (m *Manager) SetNodeHealthChecker(fn NodeHealthChecker) { m.nodeHealthy = fn }
-
-func (m *Manager) Store() *Store { return m.store }
-
-// DNSAliasCreator creates a CNAME record so that alias resolves to target.
-// Injected to avoid circular imports with capper/internal/dns.
 type DNSAliasCreator func(zoneID, alias, target string) error
 
-// SetAlias attaches a DNS CNAME alias to an existing load balancer.
-// alias is a bare hostname (e.g. "myapp"); target is the LB's existing DNS name.
-// The caller must supply a DNSAliasCreator that writes the CNAME record.
 func (m *Manager) SetAlias(nameOrID, project, zoneID, alias, target string, createCNAME DNSAliasCreator) error {
 	lb, err := m.store.Get(nameOrID, project)
 	if err != nil {
@@ -77,7 +68,7 @@ func (m *Manager) SetAlias(nameOrID, project, zoneID, alias, target string, crea
 	return nil
 }
 
-// Create stores a new load balancer record.
+// Create stores a legacy load balancer record (backward compatible).
 func (m *Manager) Create(name, project, networkID, listenAddr string, mode LBMode) (LoadBalancer, error) {
 	if name == "" {
 		return LoadBalancer{}, fmt.Errorf("lb: name is required")
@@ -87,6 +78,9 @@ func (m *Manager) Create(name, project, networkID, listenAddr string, mode LBMod
 		Name:       name,
 		Project:    project,
 		NetworkID:  networkID,
+		SubnetID:   networkID,
+		Scheme:     SchemeInternal,
+		Type:       TypeApplication,
 		Mode:       mode,
 		ListenAddr: listenAddr,
 		Status:     StatusActive,
@@ -98,27 +92,112 @@ func (m *Manager) Create(name, project, networkID, listenAddr string, mode LBMod
 	return lb, nil
 }
 
-// Get returns a load balancer by name or ID.
+// CreateExtended creates an LB with scheme, VIP, and optional first listener.
+func (m *Manager) CreateExtended(opts CreateOptions) (LBDetail, error) {
+	if opts.Name == "" {
+		return LBDetail{}, fmt.Errorf("lb: name is required")
+	}
+	if opts.Scheme == "" {
+		opts.Scheme = SchemeInternal
+	}
+	if opts.Type == "" {
+		opts.Type = TypeApplication
+	}
+	if opts.Algorithm == "" {
+		opts.Algorithm = AlgoRoundRobin
+	}
+	lb := LoadBalancer{
+		ID:           newID(),
+		Name:         opts.Name,
+		Project:      opts.Project,
+		VPCID:        opts.VPCID,
+		SubnetID:     opts.SubnetID,
+		NetworkID:    opts.SubnetID,
+		Scheme:       opts.Scheme,
+		Type:         opts.Type,
+		VIPAddress:   opts.VIPAddress,
+		RoutableIPID: opts.RoutableIPID,
+		Status:       StatusActive,
+		Algorithm:    opts.Algorithm,
+		Selector:     opts.Selector,
+		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := m.store.Insert(lb); err != nil {
+		return LBDetail{}, fmt.Errorf("lb: store: %w", err)
+	}
+
+	detail := LBDetail{LoadBalancer: lb}
+
+	if opts.TargetGroupName != "" || opts.ListenerPort > 0 {
+		tgName := opts.TargetGroupName
+		if tgName == "" {
+			tgName = opts.Name + "-default"
+		}
+		tgPort := opts.TargetGroupPort
+		if tgPort == 0 {
+			tgPort = 80
+		}
+		proto := strings.ToLower(opts.ListenerProtocol)
+		if proto == "" {
+			proto = "tcp"
+		}
+		tg, err := m.store.CreateTargetGroup(opts.Project, tgName, opts.VPCID, lb.ID, proto, tgPort, "/")
+		if err != nil {
+			_ = m.store.Delete(lb.ID, opts.Project)
+			return LBDetail{}, err
+		}
+		detail.TargetGroups = append(detail.TargetGroups, tg)
+
+		if opts.InitialTargetAddr != "" {
+			t, err := m.store.AddTarget(tg.ID, opts.InitialTargetAddr, 1)
+			if err != nil {
+				_ = m.store.Delete(lb.ID, opts.Project)
+				return LBDetail{}, err
+			}
+			detail.Targets = append(detail.Targets, t)
+		}
+
+		lstPort := opts.ListenerPort
+		if lstPort == 0 {
+			lstPort = 80
+		}
+		lstProto := opts.ListenerProtocol
+		if lstProto == "" {
+			lstProto = "TCP"
+		}
+		lst, err := m.store.CreateListener(lb.ID, tg.ID, lstProto, lstPort, opts.ListenerCertID)
+		if err != nil {
+			_ = m.store.Delete(lb.ID, opts.Project)
+			return LBDetail{}, err
+		}
+		detail.Listeners = append(detail.Listeners, lst)
+	}
+
+	return detail, nil
+}
+
 func (m *Manager) Get(nameOrID, project string) (LoadBalancer, error) {
 	return m.store.Get(nameOrID, project)
 }
 
-// List returns all load balancers for the project.
+func (m *Manager) GetDetail(nameOrID, project string) (LBDetail, error) {
+	return m.store.GetDetail(nameOrID, project)
+}
+
 func (m *Manager) List(project string) ([]LoadBalancer, error) {
 	return m.store.List(project)
 }
 
-// Delete removes an LB and stops its proxy if running.
 func (m *Manager) Delete(nameOrID, project string) error {
 	lb, err := m.store.Get(nameOrID, project)
 	if err != nil {
 		return err
 	}
-	m.stopProxy(lb.ID)
+	listeners, _ := m.store.ListListeners(lb.ID)
+	m.stopProxiesForLB(lb.ID, listeners)
 	return m.store.Delete(nameOrID, project)
 }
 
-// Publish updates the listen address of an LB and restarts its proxy.
 func (m *Manager) Publish(nameOrID, project, addr string) error {
 	lb, err := m.store.Get(nameOrID, project)
 	if err != nil {
@@ -127,12 +206,56 @@ func (m *Manager) Publish(nameOrID, project, addr string) error {
 	if err := m.store.UpdateListenAddr(lb.ID, addr); err != nil {
 		return err
 	}
-	// Restart proxy with new address.
-	m.stopProxy(lb.ID)
+	m.restartLBProxies(lb.ID)
 	return nil
 }
 
-// AddBackend adds a backend to the LB and signals the proxy to reload.
+func (m *Manager) SetMeta(nameOrID, project, selector, tlsCertName string, algo LBAlgorithm) error {
+	lb, err := m.store.Get(nameOrID, project)
+	if err != nil {
+		return err
+	}
+	if algo == "" {
+		algo = lb.Algorithm
+	}
+	if err := m.store.SetMeta(lb.ID, selector, tlsCertName, algo); err != nil {
+		return err
+	}
+	m.restartLBProxies(lb.ID)
+	return nil
+}
+
+func (m *Manager) SetTLSCert(nameOrID, project, certRef string) error {
+	lb, err := m.store.Get(nameOrID, project)
+	if err != nil {
+		return err
+	}
+	if err := m.store.SetMeta(lb.ID, lb.Selector, certRef, lb.Algorithm); err != nil {
+		return err
+	}
+	m.restartLBProxies(lb.ID)
+	return nil
+}
+
+func (m *Manager) ClearTLSCert(nameOrID, project string) error {
+	return m.SetTLSCert(nameOrID, project, "")
+}
+
+func (m *Manager) SetListenerCertificate(lbName, project, listenerID, certID string) error {
+	lb, err := m.store.Get(lbName, project)
+	if err != nil {
+		return err
+	}
+	if err := m.store.SetListenerCertificate(listenerID, certID); err != nil {
+		return err
+	}
+	// Stop then reconcile so HTTPS picks up the new cert immediately.
+	m.stopProxy(listenerID)
+	_ = m.Reconcile(context.Background())
+	_ = lb
+	return nil
+}
+
 func (m *Manager) AddBackend(nameOrID, project, address string) (Backend, error) {
 	lb, err := m.store.Get(nameOrID, project)
 	if err != nil {
@@ -142,11 +265,9 @@ func (m *Manager) AddBackend(nameOrID, project, address string) (Backend, error)
 	if err != nil {
 		return Backend{}, fmt.Errorf("lb: add backend: %w", err)
 	}
-	// Signal running proxy to reload its backend list on next tick.
 	return b, nil
 }
 
-// RemoveBackend removes a backend from the LB.
 func (m *Manager) RemoveBackend(nameOrID, project, address string) error {
 	lb, err := m.store.Get(nameOrID, project)
 	if err != nil {
@@ -155,7 +276,6 @@ func (m *Manager) RemoveBackend(nameOrID, project, address string) error {
 	return m.store.RemoveBackend(lb.ID, address)
 }
 
-// ListBackends returns all backends for the named LB.
 func (m *Manager) ListBackends(nameOrID, project string) ([]Backend, error) {
 	lb, err := m.store.Get(nameOrID, project)
 	if err != nil {
@@ -164,63 +284,150 @@ func (m *Manager) ListBackends(nameOrID, project string) ([]Backend, error) {
 	return m.store.ListBackends(lb.ID)
 }
 
-// Reconcile starts proxies for active LBs that are not yet running, syncs
-// selector-mode backends, and stops proxies for deleted/stopped LBs.
+func (m *Manager) CreateTargetGroupForLB(lbName, project, name, protocol string, port int, healthPath string) (TargetGroup, error) {
+	lb, err := m.store.Get(lbName, project)
+	if err != nil {
+		return TargetGroup{}, err
+	}
+	return m.store.CreateTargetGroup(project, name, lb.VPCID, lb.ID, protocol, port, healthPath)
+}
+
+func (m *Manager) DeleteTargetGroup(lbName, project, tgID string) error {
+	lb, err := m.store.Get(lbName, project)
+	if err != nil {
+		return err
+	}
+	tg, err := m.store.GetTargetGroup(tgID)
+	if err != nil {
+		return err
+	}
+	if tg.LoadBalancerID != lb.ID {
+		return fmt.Errorf("target group does not belong to this load balancer")
+	}
+	listeners, _ := m.store.ListListeners(lb.ID)
+	for _, lst := range listeners {
+		if lst.TargetGroupID == tgID {
+			m.stopProxy(lst.ID)
+			_ = m.store.DeleteListener(lst.ID)
+		}
+	}
+	return m.store.DeleteTargetGroup(tgID)
+}
+
+func (m *Manager) CreateListenerForLB(lbName, project, tgID, protocol string, port int, certID string) (Listener, error) {
+	lb, err := m.store.Get(lbName, project)
+	if err != nil {
+		return Listener{}, err
+	}
+	return m.store.CreateListener(lb.ID, tgID, protocol, port, certID)
+}
+
+func (m *Manager) DeleteListener(lbName, project, listenerID string) error {
+	if _, err := m.store.Get(lbName, project); err != nil {
+		return err
+	}
+	m.stopProxy(listenerID)
+	return m.store.DeleteListener(listenerID)
+}
+
+func (m *Manager) AddTarget(lbName, project, tgID, address string) (Target, error) {
+	lb, err := m.store.Get(lbName, project)
+	if err != nil {
+		return Target{}, err
+	}
+	tg, err := m.store.GetTargetGroup(tgID)
+	if err != nil {
+		return Target{}, err
+	}
+	if tg.LoadBalancerID != lb.ID {
+		return Target{}, fmt.Errorf("target group does not belong to this load balancer")
+	}
+	t, err := m.store.AddTarget(tgID, address, 1)
+	if err != nil {
+		return Target{}, err
+	}
+	m.restartListenersForTG(tgID)
+	return t, nil
+}
+
+func (m *Manager) RemoveTarget(lbName, project, tgID, targetID string) error {
+	if _, err := m.store.Get(lbName, project); err != nil {
+		return err
+	}
+	if err := m.store.RemoveTarget(tgID, targetID); err != nil {
+		return err
+	}
+	m.restartListenersForTG(tgID)
+	return nil
+}
+
 func (m *Manager) Reconcile(ctx context.Context) error {
-	active, err := m.store.ListActive()
+	specs, err := m.store.ListProxySpecs()
 	if err != nil {
 		return err
 	}
 
-	// Sync selector-mode backends before starting proxies.
 	if m.instList != nil {
 		instances, ierr := m.instList()
 		if ierr == nil {
-			for _, lb := range active {
-				if lb.Selector != "" {
-					m.syncSelectorBackends(lb, instances)
+			for _, spec := range specs {
+				if spec.LB.Selector != "" && spec.TargetGroupID == "" {
+					m.syncSelectorBackends(spec.LB, instances)
 				}
 			}
 		}
 	}
 
-	activeIDs := make(map[string]LoadBalancer, len(active))
-	for _, lb := range active {
-		activeIDs[lb.ID] = lb
+	activeKeys := make(map[string]ProxySpec, len(specs))
+	for _, spec := range specs {
+		activeKeys[spec.Key] = spec
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for id, p := range m.running {
-		if _, ok := activeIDs[id]; !ok {
-			p.Stop()
-			delete(m.running, id)
+	for key, entry := range m.running {
+		if _, ok := activeKeys[key]; !ok {
+			entry.runner.Stop()
+			delete(m.running, key)
 		}
 	}
 
-	for id, l := range activeIDs {
-		if _, ok := m.running[id]; ok {
-			continue
+	for key, spec := range activeKeys {
+		if entry, ok := m.running[key]; ok {
+			if proxySpecEqual(entry.spec, spec) {
+				continue
+			}
+			entry.runner.Stop()
+			delete(m.running, key)
 		}
 		logPath := ""
 		if m.logDir != "" {
-			logPath = m.logDir + "/" + l.ID + ".log"
+			logPath = m.logDir + "/" + spec.Key + ".log"
 		}
 		var p proxyRunner
-		if l.Mode == ModeHTTP {
-			p = newHTTPProxy(l, m.store, m.certRes, logPath)
+		if spec.Mode == ModeHTTP || spec.Mode == ModeHTTPS {
+			p = newHTTPProxy(spec, m.store, m.certRes, m.acmeHandler, logPath)
 		} else {
-			p = newProxy(l, m.store, m.certRes, logPath)
+			p = newProxy(spec, m.store, m.certRes, logPath)
 		}
-		m.running[id] = p
+		m.running[key] = runningEntry{runner: p, spec: spec}
 		go func(p proxyRunner) { _ = p.Start(ctx) }(p)
 	}
 	return nil
 }
 
-// syncSelectorBackends adds/removes backends for a selector-mode LB based on
-// the current instance list. Selector format: "key=value".
+func proxySpecEqual(a, b ProxySpec) bool {
+	return a.Key == b.Key &&
+		a.ListenAddr == b.ListenAddr &&
+		a.Mode == b.Mode &&
+		a.TargetGroupID == b.TargetGroupID &&
+		a.TLSCertName == b.TLSCertName &&
+		a.LB.Algorithm == b.LB.Algorithm &&
+		a.LB.Selector == b.LB.Selector &&
+		a.LB.VIPAddress == b.LB.VIPAddress
+}
+
 func (m *Manager) syncSelectorBackends(lb LoadBalancer, instances []types.Instance) {
 	k, v, ok := strings.Cut(lb.Selector, "=")
 	if !ok {
@@ -235,7 +442,6 @@ func (m *Manager) syncSelectorBackends(lb LoadBalancer, instances []types.Instan
 		if inst.Labels[k] != v || inst.NetworkIP == "" {
 			continue
 		}
-		// Skip instances on unhealthy nodes when a health checker is wired in.
 		if m.nodeHealthy != nil && inst.NodeID != "" && !m.nodeHealthy(inst.NodeID) {
 			continue
 		}
@@ -246,22 +452,37 @@ func (m *Manager) syncSelectorBackends(lb LoadBalancer, instances []types.Instan
 	}
 }
 
-// LBStat is a point-in-time stats snapshot for one load balancer.
+func (m *Manager) ListTargetGroups(project string) ([]TargetGroup, error) {
+	return m.store.ListTargetGroups(project)
+}
+
+func (m *Manager) CreateTargetGroup(project, name, vpcID, protocol string, port int, healthPath string) (TargetGroup, error) {
+	return m.store.CreateTargetGroup(project, name, vpcID, "", protocol, port, healthPath)
+}
+
+func (m *Manager) ListListeners(lbID string) ([]Listener, error) {
+	return m.store.ListListeners(lbID)
+}
+
+func (m *Manager) CreateListener(lbID, tgID, protocol string, port int) (Listener, error) {
+	return m.store.CreateListener(lbID, tgID, protocol, port, "")
+}
+
 type LBStat struct {
 	LBID          string
 	LBName        string
+	ListenerID    string
 	TotalRequests uint64
 	ActiveConns   int64
 }
 
-// RunningStats returns stats for all currently-running proxies.
 func (m *Manager) RunningStats() []LBStat {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]LBStat, 0, len(m.running))
-	for id, p := range m.running {
-		stat := LBStat{LBID: id}
-		switch pr := p.(type) {
+	for key, entry := range m.running {
+		stat := LBStat{LBID: entry.spec.LB.ID, LBName: entry.spec.LB.Name, ListenerID: key}
+		switch pr := entry.runner.(type) {
 		case *Proxy:
 			stat.TotalRequests = pr.TotalRequests.Load()
 			stat.ActiveConns = pr.ActiveConns.Load()
@@ -274,11 +495,33 @@ func (m *Manager) RunningStats() []LBStat {
 	return out
 }
 
-func (m *Manager) stopProxy(id string) {
+func (m *Manager) stopProxy(key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if p, ok := m.running[id]; ok {
-		p.Stop()
-		delete(m.running, id)
+	if entry, ok := m.running[key]; ok {
+		entry.runner.Stop()
+		delete(m.running, key)
+	}
+}
+
+func (m *Manager) stopProxiesForLB(lbID string, listeners []Listener) {
+	m.stopProxy(lbID)
+	for _, lst := range listeners {
+		m.stopProxy(lst.ID)
+	}
+}
+
+func (m *Manager) restartLBProxies(lbID string) {
+	listeners, _ := m.store.ListListeners(lbID)
+	m.stopProxiesForLB(lbID, listeners)
+}
+
+func (m *Manager) restartListenersForTG(tgID string) {
+	ids, err := m.store.ListListenerIDsForTG(tgID)
+	if err != nil {
+		return
+	}
+	for _, id := range ids {
+		m.stopProxy(id)
 	}
 }

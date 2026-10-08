@@ -24,7 +24,7 @@ Available on every `capper` command:
 | --- | --- | --- |
 | `--store <path>` | `~/.capper` | Control-plane store directory (holds `capper.db`, keys). |
 | `--project <name>` | `default` | Project namespace for resources. |
-| `--runtime <backend>` | `auto` | Capsule runtime: `auto`, `bwrap`, `chroot`, `crun`, `runc`. |
+| `--runtime <backend>` | `auto` | Capsule runtime: `auto`, `bwrap`, `chroot`, `crun`, `runc`, `lxc`, `qemu`. Host default when instance omits `runtimeMode`. |
 | `--json` | off | Emit JSON output where applicable. |
 | `--debug` | off | Enable debug logging. |
 

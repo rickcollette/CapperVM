@@ -3,7 +3,7 @@ title: "Onboard a New Team"
 description: "Create a VPC, IAM users and groups, assign policies, and set quotas."
 owner: "docs"
 status: "stable"
-reviewed: "2026-06-10"
+reviewed: "2026-06-19"
 outputs:
   - markdown
   - web
@@ -29,11 +29,20 @@ A green **online** badge in the top-right confirms the API is reachable. The Rec
 
 ---
 
-## Step 2 — Create a VPC
+## Step 2 — Configure host storage
+
+Navigate to **Admin → Storage**, register a pool, and set the **default instance pool**.
+AIO installs do this automatically; verify before handing the environment to the team.
+
+![Admin storage](/assets/images/screenshots/31-admin-storage.png)
+
+---
+
+## Step 3 — Create a VPC
 
 Navigate to **Network → VPCs** and click **Create VPC**.
 
-![VPCs](/assets/images/screenshots/04-vpcs.png)
+![VPCs](/assets/images/screenshots/03-vpcs.png)
 
 Fill in:
 - **Name** — e.g. `team-alpha`
@@ -48,7 +57,7 @@ The subnet CIDR must fall within the VPC CIDR. Instances launched into this VPC 
 
 ---
 
-## Step 3 — Create IAM Users
+## Step 4 — Create IAM Users
 
 Navigate to **IAM → Users**.
 
@@ -58,7 +67,7 @@ Create one user per team member. Each user gets a unique ID prefixed with `usr_`
 
 ---
 
-## Step 4 — Create a Group and Assign Members
+## Step 5 — Create a Group and Assign Members
 
 Navigate to **IAM → Groups** and create a group named `team-alpha-developers`. Add each user created in the previous step as a member.
 
@@ -66,7 +75,7 @@ Groups make policy assignment easier: attach a policy once to the group rather t
 
 ---
 
-## Step 5 — Simulate and Attach a Policy
+## Step 6 — Simulate and Attach a Policy
 
 Before attaching a policy, use the simulator to verify it grants exactly what you intend.
 
@@ -80,7 +89,7 @@ Navigate to **IAM → Policies**, create a policy scoped to the resources the te
 
 ---
 
-## Step 6 — Set Quotas
+## Step 7 — Set Quotas
 
 Navigate to **System → Quotas** to cap how many resources the team can consume.
 
@@ -89,13 +98,9 @@ Navigate to **System → Quotas** to cap how many resources the team can consume
 Recommended starting limits for a new team:
 - `instances` — 10
 - `storage_bytes` — 107374182400 (100 GiB)
-- `networks` — 5
+- `vpcs` — 3
 
-Quotas are enforced at the API layer; any request that would exceed a limit is rejected with a `429` response.
-
----
-
-## Step 7 — Verify via Audit Log
+## Step 8 — Verify via Audit Log
 
 Navigate to **IAM → Audit Log** and confirm all the actions from this tutorial appear — VPC creation, user creation, group membership changes, and policy attachments. This is the record you will reference during any future access review.
 

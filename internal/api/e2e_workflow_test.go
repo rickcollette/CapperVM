@@ -164,7 +164,31 @@ func TestFullDeploymentWorkflow(t *testing.T) {
 			"zone": "z1",
 		})
 	subnet := mustOK(t, code, subResp, "vpc:create-subnet")
-	t.Logf("[vpc] created subnet id=%s", strField(subnet, "id"))
+	subnetID := strField(subnet, "id")
+	t.Logf("[vpc] created subnet id=%s", subnetID)
+
+	// =========================================================================
+	// Step 3b — Storage pool: required for instance/volume disks
+	// =========================================================================
+	poolDir := filepath.Join(srv.ctrl.Store.Paths.Root, "e2e-pool")
+	if err := os.MkdirAll(poolDir, 0o755); err != nil {
+		t.Fatalf("[storage] mkdir pool: %v", err)
+	}
+	code, poolResp := auth(http.MethodPost, "/api/v1/admin/storage-pools", map[string]any{
+		"name":       "e2e-pool",
+		"backend":    "directory",
+		"mountpoint": poolDir,
+		"totalBytes": int64(10 * 1024 * 1024 * 1024),
+	})
+	pool := mustOK(t, code, poolResp, "storage:create-pool")
+	poolID := strField(pool, "id")
+	code, _ = auth(http.MethodPut, "/api/v1/admin/storage/settings", map[string]any{
+		"defaultInstancePool": poolID,
+	})
+	if code < 200 || code >= 300 {
+		t.Fatalf("[storage] set default pool failed: %d", code)
+	}
+	t.Logf("[storage] configured default pool %s", poolID)
 
 	// =========================================================================
 	// Step 4 — Image: seed a minimal .cap file in the staging dir and import it
@@ -197,8 +221,10 @@ func TestFullDeploymentWorkflow(t *testing.T) {
 	// if creation succeeded.
 	// =========================================================================
 	code, instResp := auth(http.MethodPost, "/api/v1/instances", map[string]any{
-		"image": imageName,
-		"name":  "e2e-inst",
+		"image":    imageName,
+		"name":     "e2e-inst",
+		"subnetId": subnetID,
+		"vpcId":    strField(vpc, "id"),
 		"labels": map[string]string{
 			"env":  "e2e",
 			"role": "web",
@@ -230,8 +256,8 @@ func TestFullDeploymentWorkflow(t *testing.T) {
 	t.Logf("[storage] created bucket %s", bucketName)
 
 	code, volResp := auth(http.MethodPost, "/api/v1/storage/volumes", map[string]any{
-		"name":   "e2e-data",
-		"sizeGB": 1,
+		"name":      "e2e-data",
+		"sizeBytes": int64(1 * 1024 * 1024 * 1024),
 	})
 	vol := mustOK(t, code, volResp, "storage:create-volume")
 	t.Logf("[storage] created volume %s", strField(vol, "name"))
@@ -316,15 +342,12 @@ func TestFullDeploymentWorkflow(t *testing.T) {
 	// =========================================================================
 	code, stackResp := auth(http.MethodPost, "/api/v1/stacks", map[string]any{
 		"name": "e2e-app",
-		"networks": []map[string]any{
-			{"name": "e2e-net", "subnet": "10.99.2.0/24", "mode": "nat"},
-		},
 		"instances": []map[string]any{
 			{
-				"name":    "e2e-web",
-				"image":   imageName,
-				"network": "e2e-net",
-				"labels":  map[string]string{"role": "web"},
+				"name":     "e2e-web",
+				"image":    imageName,
+				"subnetId": subnetID,
+				"labels":   map[string]string{"role": "web"},
 			},
 		},
 		"dns": []map[string]any{
@@ -377,8 +400,10 @@ func TestFullDeploymentWorkflow(t *testing.T) {
 	t.Logf("[redeploy] imported v2 image %s", imageNameV2)
 
 	code, inst2Resp := auth(http.MethodPost, "/api/v1/instances", map[string]any{
-		"image": imageNameV2,
-		"name":  "e2e-inst-v2",
+		"image":    imageNameV2,
+		"name":     "e2e-inst-v2",
+		"subnetId": subnetID,
+		"vpcId":    strField(vpc, "id"),
 		"labels": map[string]string{
 			"env":     "e2e",
 			"role":    "web",
@@ -402,7 +427,6 @@ func TestFullDeploymentWorkflow(t *testing.T) {
 	}{
 		{"images", "/api/v1/images", http.StatusOK},
 		{"vpcs", "/api/v1/vpcs", http.StatusOK},
-		{"networks", "/api/v1/networks", http.StatusOK},
 		{"buckets", "/api/v1/storage/buckets", http.StatusOK},
 		{"volumes", "/api/v1/storage/volumes", http.StatusOK},
 		{"dns-zones", "/api/v1/dns/zones", http.StatusOK},

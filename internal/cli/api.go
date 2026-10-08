@@ -46,6 +46,8 @@ func apiCmd(opts *options) *cobra.Command {
 				if aopts.withDaemon {
 					dopts := control.DefaultDaemonOptions()
 					daemon = control.NewDaemon(ctrl.Store, ctrl.Instances, dopts)
+					control.WireLBCertificates(ctrl.Store, ctrl.CertMgr)
+					control.StartCertRenewal(ctx, ctrl.CertMgr)
 					go daemon.Run(ctx)
 				}
 				// Bootstrap admin: ensure a configured email is an active admin

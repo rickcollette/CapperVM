@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"capper/internal/iox"
 	"archive/tar"
 	"compress/gzip"
 	"crypto/sha256"
@@ -561,7 +562,7 @@ func extractTarGz(src, dest string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(out, tr); err != nil { //nolint:gosec // bundle size bounded by operator
+			if _, err := iox.CopyLimited(out, tr, iox.DefaultMaxArchiveEntry); err != nil {
 				_ = out.Close()
 				return err
 			}

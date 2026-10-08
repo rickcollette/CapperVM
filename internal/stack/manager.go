@@ -2,7 +2,7 @@ package stack
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/sha256"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -52,15 +52,10 @@ func (m *Manager) List(project string) ([]Stack, error) {
 
 // Plan returns what would be created to apply tmpl.
 func (m *Manager) Plan(tmpl StackTemplate, project string) ([]PlanOp, error) {
-	var ops []PlanOp
-	for _, n := range tmpl.Networks {
-		_, err := m.deps.Networks.Get(n.Name, project)
-		if err != nil {
-			ops = append(ops, PlanOp{Action: "create", Type: "network", Name: n.Name, Reason: "not found"})
-		} else {
-			ops = append(ops, PlanOp{Action: "update", Type: "network", Name: n.Name, Reason: "exists"})
-		}
+	if len(tmpl.Networks) > 0 {
+		return nil, fmt.Errorf("stack networks[] is removed; use VPC subnets")
 	}
+	var ops []PlanOp
 	for _, inst := range tmpl.Instances {
 		ops = append(ops, PlanOp{Action: "create", Type: "instance", Name: inst.Name, Reason: "defined in template"})
 	}
@@ -99,27 +94,11 @@ func (m *Manager) Apply(ctx context.Context, tmpl StackTemplate, project string)
 
 	var resources []StackResource
 
-	// 1. Networks
-	netMgr := network.NewManager(m.deps.Networks)
-	for _, spec := range tmpl.Networks {
-		mode := spec.Mode
-		if mode == "" {
-			mode = "nat"
-		}
-		n, nerr := m.deps.Networks.Get(spec.Name, project)
-		if nerr != nil {
-			n, nerr = netMgr.Create(spec.Name, project, network.CreateOptions{
-				Subnet: spec.Subnet,
-				Mode:   mode,
-			})
-			if nerr != nil {
-				return nil, fmt.Errorf("stack: create network %q: %w", spec.Name, nerr)
-			}
-		}
-		resources = append(resources, StackResource{Type: "network", Name: spec.Name, ID: n.ID})
+	if len(tmpl.Networks) > 0 {
+		return nil, fmt.Errorf("stack networks[] is removed; use VPC subnets")
 	}
 
-	// 2. Instances — record only (image file must exist for actual launch)
+	// Instances — record only (image file must exist for actual launch)
 	for _, spec := range tmpl.Instances {
 		resources = append(resources, StackResource{Type: "instance", Name: spec.Name, ID: ""})
 	}
@@ -248,7 +227,7 @@ func (m *Manager) ReconcileReplicas(ctx context.Context, project string) error {
 
 func templateHash(tmpl StackTemplate) string {
 	data, _ := json.Marshal(tmpl)
-	h := md5.Sum(data)
+	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
 }
 

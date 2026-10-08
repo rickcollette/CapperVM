@@ -61,6 +61,11 @@ func InitSchema(db *sql.DB) error {
 			enabled        INTEGER NOT NULL DEFAULT 1,
 			created_at     TEXT NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS dns_zone_vpc_assoc (
+			zone_id TEXT NOT NULL,
+			vpc_id  TEXT NOT NULL,
+			PRIMARY KEY (zone_id, vpc_id)
+		);`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	capperdns "capper/internal/dns"
@@ -53,6 +54,12 @@ func (s *Server) handleCreateDNSZone(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err)
 		return
 	}
+	if req.NetworkID != "" {
+		if _, err := s.ctrl.Store.VPC.GetSubnetByID(req.NetworkID); err != nil {
+			writeBadRequest(w, fmt.Errorf("networkId must be a vpc subnet id"))
+			return
+		}
+	}
 	z, err := capperdns.NewManager(s.ctrl.Store.DNS).CreateZone(req.Name, req.Type, req.NetworkID, req.DefaultTTL, req.Description)
 	if err != nil {
 		writeBadRequest(w, err)
@@ -91,6 +98,12 @@ func (s *Server) handleCreateDNSRecord(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeBadRequest(w, err)
 		return
+	}
+	if req.NetworkID != "" {
+		if _, err := s.ctrl.Store.VPC.GetSubnetByID(req.NetworkID); err != nil {
+			writeBadRequest(w, fmt.Errorf("networkId must be a vpc subnet id"))
+			return
+		}
 	}
 	rec, err := capperdns.NewManager(s.ctrl.Store.DNS).CreateRecord(zone, req.NetworkID, req.Name, req.Type, req.Values, req.TTL)
 	if err != nil {

@@ -1,6 +1,7 @@
 package marketplace
 
 import (
+	"capper/internal/iox"
 	"archive/tar"
 	"bytes"
 	"crypto/sha256"
@@ -137,7 +138,7 @@ func addTarEntry(path, name string, data []byte) error {
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
-		if _, err := io.Copy(tw, tr); err != nil {
+		if _, err := iox.CopyLimited(tw, tr, iox.DefaultMaxArchiveEntry); err != nil {
 			return err
 		}
 	}

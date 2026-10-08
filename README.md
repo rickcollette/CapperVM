@@ -128,7 +128,7 @@ go run ./cmd/capper --store /tmp/capper-alpine list instances
 
 > [!TIP]
 > Capper prefers Bubblewrap (`bwrap`) with unprivileged user namespaces and falls
-> back to chroot (may need `sudo`). Choose with `--runtime bwrap|chroot|crun|runc`,
+> back to chroot (may need `sudo`). Choose with `--runtime bwrap|chroot|crun|runc|lxc|qemu`,
 > and cap resources with `--memory 128M --cpu-time 60 --file-size 16M`.
 
 </details>

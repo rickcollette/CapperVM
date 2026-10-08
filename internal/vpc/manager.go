@@ -107,10 +107,20 @@ func (m *Manager) DeleteSubnet(nameOrID, vpcID string) error {
 
 // CreateRouteTable creates a route table inside a VPC.
 func (m *Manager) CreateRouteTable(vpcID, name string) (RouteTable, error) {
+	return m.createRouteTable(vpcID, name, false)
+}
+
+// CreateRouteTableMain creates the main route table for a VPC.
+func (m *Manager) CreateRouteTableMain(vpcID, name string) (RouteTable, error) {
+	return m.createRouteTable(vpcID, name, true)
+}
+
+func (m *Manager) createRouteTable(vpcID, name string, isMain bool) (RouteTable, error) {
 	rt := RouteTable{
 		ID:        newID("rtb"),
 		VPCID:     vpcID,
 		Name:      name,
+		IsMain:    isMain,
 		CreatedAt: now(),
 	}
 	if err := m.store.InsertRouteTable(rt); err != nil {

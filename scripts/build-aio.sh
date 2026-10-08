@@ -7,22 +7,30 @@
 #
 # Environment overrides:
 #   CAPDB_DIR      CapDB checkout dir (default ./CapDB; cloned via make capdb-fetch)
-#   CAPPERWEB_DIR  CapperWeb checkout for the console (default /home/megalith/CapperWeb)
+#   CAPPERWEB_DIR  CapperWeb checkout for the console (default ../CapperWeb)
 #   SKIP_WEB=1     skip the npm console build (ships no console/)
 #   SKIP_TESTS=1   skip the test gate (build + package only; not recommended)
+#   BUMP_VERSION=1 when no VERSION arg: auto-increment patch in ./VERSION (default 1)
 set -euo pipefail
 
 # ── Locations ─────────────────────────────────────────────────────────────────
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+ROOT="$(CDPATH="" cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
 
 CAPDB_DIR="${CAPDB_DIR:-CapDB}"
-CAPPERWEB_DIR="${CAPPERWEB_DIR:-/home/megalith/CapperWeb}"
+CAPPERWEB_DIR="${CAPPERWEB_DIR:-$ROOT/../CapperWeb}"
 BUILD_CAPDB="$ROOT/build/capdb"
 
 VERSION="${1:-}"
 if [ -z "$VERSION" ]; then
-  if [ -f VERSION ]; then VERSION="$(tr -d ' \n' < VERSION)"; else VERSION="0.0.0-$(date +%Y%m%d)"; fi
+  if [ "${BUMP_VERSION:-1}" = "1" ]; then
+    VERSION="$(scripts/bump-version.sh patch)"
+    echo "Bumped VERSION -> $VERSION"
+  elif [ -f VERSION ]; then
+    VERSION="$(tr -d ' \n\r' < VERSION)"
+  else
+    VERSION="0.0.0-$(date +%Y%m%d)"
+  fi
 fi
 
 PKG="capper-aio-${VERSION}-linux-amd64"
@@ -39,7 +47,7 @@ done
 
 # Ensure the CapDB engine is checked out (clone/update from GitHub into ./CapDB).
 CAPDB_DIR="$CAPDB_DIR" make capdb-fetch
-CAPDB_DIR_ABS="$(CDPATH= cd -- "$CAPDB_DIR" && pwd)"
+CAPDB_DIR_ABS="$(CDPATH="" cd -- "$CAPDB_DIR" && pwd)"
 [ -d "$CAPDB_DIR_ABS/capdb/client" ] || { echo "error: CapDB tree not found at $CAPDB_DIR_ABS" >&2; exit 1; }
 
 # cgo paths for the capdb build tag (mirrors the Makefile).

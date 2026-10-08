@@ -31,7 +31,7 @@ capper db delete my-db
 | `--engine <engine>` | `postgres`, `redis`, or `mariadb` (required) |
 | `--version <ver>` | engine version (optional) |
 | `--port <n>` | database port (optional) |
-| `--network <name\|id>` | attach to a virtual network |
+| `--subnet <id>` | attach to a VPC subnet (required for network reachability) |
 
 ## Backups and restore
 

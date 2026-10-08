@@ -2,199 +2,14 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 
-	"capper/internal/network"
-	"capper/internal/types"
 	capstore "capper/internal/storage"
+	"capper/internal/storagepolicy"
 )
-
-func (s *Server) handleListNetworks(w http.ResponseWriter, r *http.Request) {
-	if err := s.authorize(r, "network:list", "project:"+s.project); err != nil {
-		writeForbidden(w, err)
-		return
-	}
-	nets, err := network.NewManager(s.ctrl.Store.Networks).List(s.project)
-	if err != nil {
-		writeInternal(w, err)
-		return
-	}
-	writeData(w, nets, nil)
-}
-
-func (s *Server) handleGetNetwork(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if err := s.authorize(r, "network:inspect", "network/"+name); err != nil {
-		writeForbidden(w, err)
-		return
-	}
-	n, leases, err := network.NewManager(s.ctrl.Store.Networks).Inspect(name, s.project)
-	if err != nil {
-		writeNotFound(w, "network not found")
-		return
-	}
-	writeData(w, map[string]any{"network": n, "leases": leases}, nil)
-}
-
-func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
-	if err := s.authorize(r, "network:create", "project:"+s.project); err != nil {
-		writeForbidden(w, err)
-		return
-	}
-	var req struct {
-		Name   string            `json:"name"`
-		Subnet string            `json:"subnet,omitempty"`
-		Mode   string            `json:"mode,omitempty"`
-		Labels map[string]string `json:"labels,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeBadRequest(w, err)
-		return
-	}
-	n, err := network.NewManager(s.ctrl.Store.Networks).Create(req.Name, s.project, network.CreateOptions{
-		Subnet: req.Subnet,
-		Mode:   req.Mode,
-		Labels: req.Labels,
-	})
-	if err != nil {
-		writeBadRequest(w, err)
-		return
-	}
-	s.recordEvent(r, "network", n.ID, "network.created", map[string]any{"name": req.Name})
-	writeJSON(w, http.StatusCreated, Envelope{Data: n})
-}
-
-func (s *Server) handleDeleteNetwork(w http.ResponseWriter, r *http.Request) {
-	nameOrID := r.PathValue("name")
-	n, err := s.ctrl.Store.Networks.Get(nameOrID, s.project)
-	if err != nil {
-		writeNotFound(w, "network not found")
-		return
-	}
-	if err := s.authorize(r, "network:delete", "network/"+n.Name); err != nil {
-		writeForbidden(w, err)
-		return
-	}
-	// Prune leases left behind by already-deleted instances, then block only on
-	// instances that still exist — and tell the operator exactly which ones.
-	attached, aerr := s.ctrl.Store.LiveNetworkAttachments(n.ID)
-	if aerr != nil {
-		writeInternal(w, aerr)
-		return
-	}
-	if len(attached) > 0 {
-		names := make([]string, 0, len(attached))
-		for _, a := range attached {
-			label := a.InstanceName
-			if label == "" {
-				label = a.InstanceID
-			}
-			names = append(names, fmt.Sprintf("%s (%s, %s)", label, a.IP, a.Status))
-		}
-		writeError(w, http.StatusConflict, fmt.Sprintf(
-			"network %q still has %d attached instance(s): %s — stop and delete (or disconnect) them first",
-			n.Name, len(attached), strings.Join(names, ", ")))
-		return
-	}
-	if err := network.NewManager(s.ctrl.Store.Networks).Delete(n.Name, s.project); err != nil {
-		writeBadRequest(w, err)
-		return
-	}
-	s.recordEvent(r, "network", n.ID, "network.deleted", map[string]any{"name": n.Name})
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleAttachNetwork(w http.ResponseWriter, r *http.Request) {
-	networkName := r.PathValue("name")
-	instanceRef := r.PathValue("instance")
-	if err := s.authorize(r, "network:attach", "network/"+networkName); err != nil {
-		writeForbidden(w, err)
-		return
-	}
-	inst, err := s.ctrl.Store.ResolveInstance(instanceRef)
-	if err != nil {
-		writeNotFound(w, "instance not found")
-		return
-	}
-	if inst.NetworkID != "" {
-		writeBadRequest(w, fmt.Errorf("instance already attached to a network; detach first"))
-		return
-	}
-	netMgr := network.NewManager(s.ctrl.Store.Networks)
-	lease, err := netMgr.Connect(inst.ID, networkName, s.project, "")
-	if err != nil {
-		writeBadRequest(w, err)
-		return
-	}
-	n, _, _ := netMgr.Inspect(networkName, s.project)
-	hostVeth, instanceVeth := network.VethNames(inst.ID)
-	if err := network.CreateVeth(n.Bridge, hostVeth, instanceVeth); err != nil {
-		_ = netMgr.Disconnect(inst.ID, networkName, s.project)
-		writeBadRequest(w, err)
-		return
-	}
-	prefix := network.SubnetPrefix(n.Subnet)
-	if inst.Status == types.StatusRunning && inst.PID > 0 {
-		if err := network.HotAttachNetNS(inst.PID, instanceVeth, lease.IP, prefix, n.Gateway); err != nil {
-			_ = network.DeleteVeth(hostVeth)
-			_ = netMgr.Disconnect(inst.ID, networkName, s.project)
-			writeBadRequest(w, err)
-			return
-		}
-	} else {
-		if err := network.SetupInstanceNetNS(inst.ID, instanceVeth, lease.IP, prefix, n.Gateway); err != nil {
-			_ = network.DeleteVeth(hostVeth)
-			_ = netMgr.Disconnect(inst.ID, networkName, s.project)
-			writeBadRequest(w, err)
-			return
-		}
-	}
-	inst.NetworkID = n.ID
-	inst.NetworkIP = lease.IP
-	if err := s.ctrl.Store.UpdateInstance(*inst); err != nil {
-		writeInternal(w, err)
-		return
-	}
-	_ = s.ctrl.Store.WriteInstanceJSON(*inst)
-	writeData(w, map[string]any{"status": "attached", "ip": lease.IP, "hot": inst.Status == types.StatusRunning}, nil)
-}
-
-func (s *Server) handleDetachNetwork(w http.ResponseWriter, r *http.Request) {
-	networkName := r.PathValue("name")
-	instanceRef := r.PathValue("instance")
-	if err := s.authorize(r, "network:detach", "network/"+networkName); err != nil {
-		writeForbidden(w, err)
-		return
-	}
-	inst, err := s.ctrl.Store.ResolveInstance(instanceRef)
-	if err != nil {
-		writeNotFound(w, "instance not found")
-		return
-	}
-	netMgr := network.NewManager(s.ctrl.Store.Networks)
-	if err := netMgr.Disconnect(inst.ID, networkName, s.project); err != nil {
-		writeBadRequest(w, err)
-		return
-	}
-	hostVeth, _ := network.VethNames(inst.ID)
-	_ = network.DeleteVeth(hostVeth) // deletes both ends; also removes instance's veth if hot-attached
-	if inst.Status != types.StatusRunning {
-		_ = network.TeardownInstanceNetNS(inst.ID)
-	}
-	inst.NetworkID = ""
-	inst.NetworkIP = ""
-	if err := s.ctrl.Store.UpdateInstance(*inst); err != nil {
-		writeInternal(w, err)
-		return
-	}
-	_ = s.ctrl.Store.WriteInstanceJSON(*inst)
-	writeData(w, map[string]any{"status": "detached"}, nil)
-}
 
 func (s *Server) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 	if err := s.authorize(r, "storage:bucket:list", "project:"+s.project); err != nil {
@@ -409,6 +224,14 @@ func (s *Server) handleCreateVolume(w http.ResponseWriter, r *http.Request) {
 		Class     string `json:"class,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeBadRequest(w, err)
+		return
+	}
+	if _, err := storagepolicy.RequireDefaultPool(s.ctrl.Store.AdminConfig, s.ctrl.Store.HostStorage); err != nil {
+		writeBadRequest(w, err)
+		return
+	}
+	if err := storagepolicy.ValidatePoolCapacity(s.ctrl.Store.AdminConfig, s.ctrl.Store.HostStorage, req.SizeBytes); err != nil {
 		writeBadRequest(w, err)
 		return
 	}

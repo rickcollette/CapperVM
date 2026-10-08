@@ -42,7 +42,7 @@ Regions, Zones, and Nodes.
 Create a VPC per tenant or environment. Attach subnets with explicit CIDR
 blocks to control blast radius if a workload misbehaves.
 
-![VPCs](/assets/images/screenshots/04-vpcs.png)
+![VPCs](/assets/images/screenshots/03-vpcs.png)
 
 Each VPC row expands inline to show its subnets. Click **Create VPC** to
 open the creation form; subnets can be added from the same expanded row.

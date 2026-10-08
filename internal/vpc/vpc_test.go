@@ -2,6 +2,7 @@ package vpc_test
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -71,6 +72,30 @@ func TestGetVPC(t *testing.T) {
 	}
 	if got2.Name != "my-vpc" {
 		t.Errorf("name: %q", got2.Name)
+	}
+}
+
+func TestCreateVPCExtended_DuplicateName(t *testing.T) {
+	m := newManager(t)
+	if _, err := m.CreateVPCExtended(vpc.CreateVPCOptions{
+		Project: "proj1",
+		Name:    "todd",
+		Slug:    "todd",
+		CIDR:    "10.1.0.0/16",
+	}); err != nil {
+		t.Fatalf("first CreateVPCExtended: %v", err)
+	}
+	_, err := m.CreateVPCExtended(vpc.CreateVPCOptions{
+		Project: "proj1",
+		Name:    "todd",
+		Slug:    "todd",
+		CIDR:    "10.2.0.0/16",
+	})
+	if err == nil {
+		t.Fatal("expected duplicate name error")
+	}
+	if !errors.Is(err, vpc.ErrVPCNameTaken) {
+		t.Fatalf("expected ErrVPCNameTaken, got: %v", err)
 	}
 }
 

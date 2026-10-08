@@ -3,7 +3,7 @@ title: "Manage instances"
 description: "Create, run, inspect, and operate .cap capsule instances; templates, types, and groups."
 owner: "docs"
 status: "stable"
-reviewed: "2026-06-12"
+reviewed: "2026-06-19"
 outputs:
   - markdown
   - web
@@ -36,7 +36,10 @@ capper health                                           # instance health checks
 
 Capper prefers Bubblewrap (`bwrap`) with unprivileged user namespaces, falling
 back to `chroot`, `crun`, or `runc`. Pick explicitly with the global
-`--runtime` flag. `capinit` is PID 1 inside the capsule.
+`--runtime` flag, or per instance with `capper run --runtime-mode` / API
+`runtimeMode`. LXC and QEMU are also available when host tools are installed —
+see [LXC and QEMU runtimes](runtimes-lxc-qemu.md). `capinit` is PID 1 inside
+process runtimes.
 
 > Capsule isolation is hardening, not a security boundary — do not run untrusted
 > images.
@@ -52,33 +55,42 @@ back to `chroot`, `crun`, or `runc`. Pick explicitly with the global
 | `--cpu-time <secs>` | cap CPU seconds |
 | `--file-size <size>` | cap max file size written, e.g. `64M` |
 | `--pids <n>` | cap process count |
-| `--network <name\|id>` | attach to a virtual network |
 | `--publish HOST:CONTAINER[/proto]` | publish a port (repeatable) |
 | `--mount SOURCE:TARGET[:ro]` | bind-mount (repeatable) |
 | `--secret NAME[=ENV]` | inject a [secret](secrets.md) as an env var (repeatable) |
 | `--label KEY=VALUE` | attach a label (repeatable) |
 | `--restart never\|always\|on-failure` | restart policy |
+| `--runtime-mode <mode>` | per-instance runtime: auto, bwrap, chroot, crun, runc, lxc, qemu |
 | `--rm` | remove the instance when it stops |
 | `--require-signature` / `--trusted-key <path>` | refuse unsigned images |
 | `--instance-type <type>` | enforce an instance-type envelope |
 
 See the [full CLI reference](../reference/cli/capper.md#capper-run) for every flag.
 
-### A realistic launch
+### API / Web launch
+
+Via **Compute → Instances → Launch** or `POST /api/v1/instances`:
+
+- **`subnetId`** (required) — VPC subnet; creates a primary ENI with private IP.
+- **`securityGroupIds`** — optional SGs on the ENI.
+- **Default storage pool** — required (Admin → Storage); disk validated against pool capacity.
+
+![Launch networking step](/assets/images/screenshots/33-launch-instance-networking.png)
+
+### CLI one-shot run
 
 ```bash
 capper run web.cap \
   --name web-1 \
   --memory 512M --cpu-time 0 --pids 256 \
-  --network app-net \
   --publish 0.0.0.0:8080:8080/tcp \
   --secret DB_PASSWORD=DATABASE_PASSWORD \
   --label tier=web --label env=prod \
   --restart on-failure
 ```
 
-Resource limits are enforced via cgroups; an instance that exceeds `--memory`,
-`--cpu-time`, or `--file-size` is killed.
+For the full control plane, prefer the API/Web launch path with `subnetId` so ENI,
+metadata, and pool-backed disks are provisioned correctly.
 
 ## Templates, instance types, and groups
 

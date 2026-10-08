@@ -67,7 +67,7 @@ func TestUnauthenticatedRequestsAreRejected(t *testing.T) {
 	srv, _ := newTestServer(t)
 	protectedPaths := []string{
 		"GET /api/v1/instances",
-		"GET /api/v1/networks",
+		"GET /api/v1/vpcs",
 		"GET /api/v1/iam/users",
 		"GET /api/v1/orgs",
 		"GET /api/v1/nodes",

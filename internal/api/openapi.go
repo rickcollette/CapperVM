@@ -21,7 +21,7 @@ const openAPISpec = `{
     "/health": {"get": {"summary": "Health check"}},
     "/instances": {
       "get": {"summary": "List instances"},
-      "post": {"summary": "Create instance"}
+      "post": {"summary": "Create instance (optional runtimeMode: auto|bwrap|chroot|crun|runc|lxc|qemu)"}
     },
     "/instances/{id}": {
       "get": {"summary": "Get instance"},

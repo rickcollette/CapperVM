@@ -32,6 +32,7 @@ import (
 	"capper/internal/metadata"
 	"capper/internal/queue"
 	"capper/internal/network"
+	"capper/internal/networking"
 	"capper/internal/posture"
 	"capper/internal/org"
 	"capper/internal/registry"
@@ -62,8 +63,9 @@ type Store struct {
 	Projects  *org.Store
 	IAM       *iam.Manager
 	Hosts     *host.Store
-	Networks  *network.Store
-	Firewalls *firewall.Store
+	Networks    *network.Store
+	Networking  *networking.Service
+	Firewalls   *firewall.Store
 	DNS       *capperdns.Store
 	Compute   *compute.Store
 	Storage   *storage.Store
@@ -210,6 +212,7 @@ func Open(paths Paths) (*Store, error) {
 		return nil, err
 	}
 	s.VPC = vpc.NewManager(db)
+	s.Networking = networking.NewService(db, s.Topology.Store())
 	s.VPCMover = vpcmover.NewStore(db)
 	s.Audit = audit.NewStore(db)
 	s.Quotas = quotas.NewStore(db)

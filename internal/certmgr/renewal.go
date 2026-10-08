@@ -3,7 +3,8 @@ package certmgr
 import (
 	"context"
 	"log"
-	"math/rand"
+	"crypto/rand"
+	"math/big"
 	"time"
 )
 
@@ -46,7 +47,8 @@ func (s *RenewalScheduler) runRenewalSweep(ctx context.Context) {
 		jitterMax = 30 * time.Minute
 	}
 	for _, cert := range certs {
-		jitter := time.Duration(rand.Int63n(int64(jitterMax)))
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(jitterMax)))
+		jitter := time.Duration(n.Int64())
 		select {
 		case <-ctx.Done():
 			return

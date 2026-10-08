@@ -2,12 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"capper/internal/backup"
 	"capper/internal/firewall"
-	"capper/internal/manager"
 	"capper/internal/lb"
+	"capper/internal/manager"
 	"capper/internal/stack"
 )
 
@@ -34,24 +35,32 @@ func (s *Server) handleCreateLB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name       string    `json:"name"`
-		NetworkID  string    `json:"networkId,omitempty"`
-		ListenAddr string    `json:"listenAddr"`
-		Mode       lb.LBMode `json:"mode"`
+		Name              string         `json:"name"`
+		Scheme            lb.LBScheme    `json:"scheme"`
+		Type              lb.LBType      `json:"type"`
+		VPCID             string         `json:"vpcId"`
+		SubnetID          string         `json:"subnetId"`
+		NetworkID         string         `json:"networkId,omitempty"`
+		PoolID            string         `json:"poolId"`
+		VIP               string         `json:"vip"`
+		AutoVIP           bool           `json:"autoVip"`
+		ListenAddr        string         `json:"listenAddr"`
+		Mode              lb.LBMode      `json:"mode"`
+		Algorithm         lb.LBAlgorithm `json:"algorithm,omitempty"`
+		Selector          string         `json:"selector,omitempty"`
+		TLSCertID         string         `json:"tlsCertId,omitempty"`
+		ListenerProtocol  string         `json:"listenerProtocol"`
+		ListenerPort      int            `json:"listenerPort"`
+		ListenerCertID    string         `json:"listenerCertId"`
+		TargetGroupName   string         `json:"targetGroupName"`
+		TargetGroupPort   int            `json:"targetGroupPort"`
+		InitialTargetAddr string         `json:"initialTargetAddr"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeBadRequest(w, err)
 		return
 	}
-	if req.Mode == "" {
-		req.Mode = lb.ModeTCP
-	}
-	result, err := s.ctrl.Store.LB.Create(req.Name, s.project, req.NetworkID, req.ListenAddr, req.Mode)
-	if err != nil {
-		writeBadRequest(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, Envelope{Data: result})
+	s.createLBFromRequest(w, r, req)
 }
 
 func (s *Server) handleGetLB(w http.ResponseWriter, r *http.Request) {
@@ -60,13 +69,12 @@ func (s *Server) handleGetLB(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, err)
 		return
 	}
-	l, err := s.ctrl.Store.LB.Get(name, s.project)
+	detail, err := s.ctrl.Store.LB.GetDetail(name, s.project)
 	if err != nil {
 		writeNotFound(w, "lb not found")
 		return
 	}
-	backends, _ := s.ctrl.Store.LB.ListBackends(name, s.project)
-	writeData(w, map[string]any{"lb": l, "backends": backends}, nil)
+	writeData(w, detail, nil)
 }
 
 func (s *Server) handleDeleteLB(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +83,13 @@ func (s *Server) handleDeleteLB(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, err)
 		return
 	}
+	lbRec, err := s.ctrl.Store.LB.Get(name, s.project)
+	if err != nil {
+		writeBadRequest(w, err)
+		return
+	}
+	placer := s.lbVIPPlacer()
+	_ = placer.ReleaseVIP(lbRec)
 	if err := s.ctrl.Store.LB.Delete(name, s.project); err != nil {
 		writeBadRequest(w, err)
 		return
@@ -342,6 +357,16 @@ func (s *Server) handleCreateStack(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&tmpl); err != nil {
 		writeBadRequest(w, err)
 		return
+	}
+	if len(tmpl.Networks) > 0 {
+		writeBadRequest(w, fmt.Errorf("stack networks[] is removed; use VPC subnets and set subnetId on instances"))
+		return
+	}
+	for _, inst := range tmpl.Instances {
+		if inst.Network != "" {
+			writeBadRequest(w, fmt.Errorf("instance %q: network field is removed; use subnetId", inst.Name))
+			return
+		}
 	}
 	result, err := s.ctrl.Store.Stack.Apply(r.Context(), tmpl, s.project)
 	if err != nil {

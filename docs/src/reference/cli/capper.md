@@ -23,7 +23,7 @@ Run `capper <command> --help` for the same information at the terminal. Global p
 | `--debug` | — | enable debug logging |
 | `--json` | — | emit JSON output when applicable |
 | `--project` | `default` | project namespace for resources |
-| `--runtime` | `auto` | runtime backend: auto, bwrap, chroot, crun, or runc |
+| `--runtime` | `auto` | runtime backend: auto, bwrap, chroot, crun, runc, lxc, or qemu |
 | `--store` | — | Capper store path |
 
 ## Commands

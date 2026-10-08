@@ -23,9 +23,9 @@ type backendState struct {
 	conns   atomic.Int64 // active connections (for least-connections)
 }
 
-// Proxy is a running TCP load balancer for a single LoadBalancer record.
+// Proxy is a running TCP load balancer for a single listener (or legacy LB).
 type Proxy struct {
-	lb           LoadBalancer
+	spec         ProxySpec
 	store        *Store
 	certResolver CertResolver
 	logPath      string
@@ -43,8 +43,8 @@ type Proxy struct {
 // CertResolver returns (certPEM, keyPEM) for a named cert.
 type CertResolver func(name string) (certPEM, keyPEM []byte, err error)
 
-func newProxy(lb LoadBalancer, store *Store, certRes CertResolver, logPath string) *Proxy {
-	return &Proxy{lb: lb, store: store, certResolver: certRes, logPath: logPath}
+func newProxy(spec ProxySpec, store *Store, certRes CertResolver, logPath string) *Proxy {
+	return &Proxy{spec: spec, store: store, certResolver: certRes, logPath: logPath}
 }
 
 // Start begins the TCP listener and health-check loop. Blocks until ctx done.
@@ -58,13 +58,13 @@ func (p *Proxy) Start(ctx context.Context) error {
 	var ln net.Listener
 	var err error
 
-	if p.lb.TLSCertName != "" && p.certResolver != nil {
-		cert, key, cerr := p.certResolver(p.lb.TLSCertName)
+	if p.spec.TLSCertName != "" && p.certResolver != nil {
+		cert, key, cerr := p.certResolver(p.spec.TLSCertName)
 		if cerr == nil {
 			tlsCert, cerr := tls.X509KeyPair(cert, key)
 			if cerr == nil {
-				cfg := &tls.Config{Certificates: []tls.Certificate{tlsCert}}
-				ln, err = tls.Listen("tcp", p.lb.ListenAddr, cfg)
+				cfg := &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{tlsCert}}
+				ln, err = tls.Listen("tcp", p.spec.ListenAddr, cfg)
 			} else {
 				err = cerr
 			}
@@ -73,7 +73,7 @@ func (p *Proxy) Start(ctx context.Context) error {
 		}
 	}
 	if ln == nil && err == nil {
-		ln, err = net.Listen("tcp", p.lb.ListenAddr)
+		ln, err = net.Listen("tcp", p.spec.ListenAddr)
 	}
 	if err != nil {
 		return err
@@ -152,7 +152,7 @@ func (p *Proxy) nextBackend() *backendState {
 		return nil
 	}
 
-	if p.lb.Algorithm == AlgoLeastConnections {
+	if p.spec.LB.Algorithm == AlgoLeastConnections {
 		return p.leastConnections(bs)
 	}
 	return p.roundRobin(bs)
@@ -192,7 +192,17 @@ func (p *Proxy) nextHealthy() string {
 }
 
 func (p *Proxy) reloadBackends() error {
-	stored, err := p.store.ListBackends(p.lb.ID)
+	var addrs []string
+	var err error
+	if p.spec.TargetGroupID != "" {
+		addrs, err = p.store.ListTargetAddresses(p.spec.TargetGroupID)
+	} else {
+		var stored []Backend
+		stored, err = p.store.ListBackends(p.spec.LB.ID)
+		for _, s := range stored {
+			addrs = append(addrs, s.Address)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -202,12 +212,12 @@ func (p *Proxy) reloadBackends() error {
 	for _, b := range p.backends {
 		existing[b.address] = b
 	}
-	next := make([]*backendState, 0, len(stored))
-	for _, s := range stored {
-		if prev, ok := existing[s.Address]; ok {
+	next := make([]*backendState, 0, len(addrs))
+	for _, addr := range addrs {
+		if prev, ok := existing[addr]; ok {
 			next = append(next, prev)
 		} else {
-			bs := &backendState{address: s.Address}
+			bs := &backendState{address: addr}
 			bs.healthy.Store(true)
 			next = append(next, bs)
 		}

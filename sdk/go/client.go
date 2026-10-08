@@ -235,13 +235,14 @@ func (c *Client) del(ctx context.Context, path string) error {
 type InstancesAPI struct{ c *Client }
 
 type Instance struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	Status    string            `json:"status"`
-	Image     string            `json:"image"`
-	NetworkIP string            `json:"networkIp"`
-	Labels    map[string]string `json:"labels"`
-	CreatedAt string            `json:"createdAt"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Status      string            `json:"status"`
+	Image       string            `json:"image"`
+	NetworkIP   string            `json:"networkIp"`
+	Labels      map[string]string `json:"labels"`
+	CreatedAt   string            `json:"createdAt"`
+	RuntimeMode string            `json:"runtimeMode,omitempty"`
 }
 
 func (a *InstancesAPI) List(ctx context.Context, project string) ([]Instance, error) {
@@ -402,11 +403,14 @@ func (a *SearchAPI) Search(ctx context.Context, q, project, labelFilter, typeFil
 
 // CreateInstanceRequest is the request body for creating an instance.
 type CreateInstanceRequest struct {
-	Image    string            `json:"image"`
-	Name     string            `json:"name,omitempty"`
-	Labels   map[string]string `json:"labels,omitempty"`
-	Env      map[string]string `json:"env,omitempty"`
-	Command  string            `json:"command,omitempty"`
+	Image       string            `json:"image"`
+	Name        string            `json:"name,omitempty"`
+	VPCID       string            `json:"vpcId,omitempty"`
+	SubnetID    string            `json:"subnetId,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	Command     string            `json:"command,omitempty"`
+	RuntimeMode string            `json:"runtimeMode,omitempty"`
 }
 
 func (a *InstancesAPI) Create(ctx context.Context, req CreateInstanceRequest) (Instance, error) {
@@ -425,15 +429,11 @@ type CreateNetworkRequest struct {
 }
 
 func (a *NetworksAPI) Create(ctx context.Context, project string, req CreateNetworkRequest) (Network, error) {
-	var out struct{ Data Network `json:"data"` }
-	if project != "" {
-		req.Labels = mergeMaps(req.Labels, map[string]string{"project": project})
-	}
-	return out.Data, a.c.post(ctx, "networks", req, &out)
+	return Network{}, fmt.Errorf("networks API removed; create a subnet under a VPC via Subnets/VPCs APIs")
 }
 
 func (a *NetworksAPI) Delete(ctx context.Context, name string) error {
-	return a.c.del(ctx, "networks/"+name)
+	return fmt.Errorf("networks API removed; delete the subnet via Subnets/VPCs APIs")
 }
 
 // ---- DNS (extended) ---------------------------------------------------------
@@ -470,14 +470,30 @@ func (a *DNSAPI) DeleteRecord(ctx context.Context, zone, recordID string) error 
 
 type CreateLBRequest struct {
 	Name       string `json:"name"`
+	SubnetID   string `json:"subnetId"`
 	ListenAddr string `json:"listenAddr,omitempty"`
 	Mode       string `json:"mode,omitempty"`
 	Project    string `json:"project,omitempty"`
 }
 
 func (a *LBAPI) Create(ctx context.Context, req CreateLBRequest) (LoadBalancer, error) {
-	var out struct{ Data LoadBalancer `json:"data"` }
-	return out.Data, a.c.post(ctx, "lb", req, &out)
+	var raw struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := a.c.post(ctx, "lb", req, &raw); err != nil {
+		return LoadBalancer{}, err
+	}
+	var lb LoadBalancer
+	if err := json.Unmarshal(raw.Data, &lb); err == nil && lb.Name != "" {
+		return lb, nil
+	}
+	var detail struct {
+		LoadBalancer LoadBalancer `json:"lb"`
+	}
+	if err := json.Unmarshal(raw.Data, &detail); err != nil {
+		return LoadBalancer{}, err
+	}
+	return detail.LoadBalancer, nil
 }
 
 func (a *LBAPI) Delete(ctx context.Context, name string) error {

@@ -6,13 +6,13 @@ DIST_APP    := $(DIST_DIR)/$(APP)
 RUN_DIR     := capper-run
 ALPINE_CONFIG := examples/alpine/capper.json
 ALPINE_ROOTFS := examples/alpine/rootfs/bin/sh
-CAPPERWEB_DIR := /home/megalith/CapperWeb
+CAPPERWEB_DIR ?= ../CapperWeb
 
 .PHONY: build test clean distclean dist web bootstrap-alpine \
         capper-run capper-run-stop capper-run-status \
         setcap setup capdb capdb-fetch capdb-clean test-capdb build-capdb \
         docs docs-md docs-web docs-pdf docs-serve docs-check docs-clean docs-inventory \
-        docs-gen docs-cli docs-api git-push
+        docs-gen docs-cli docs-api docs-screenshots git-push
 
 # CapDB lives in its own repository (https://github.com/rickcollette/CapDB). It is
 # checked out into ./CapDB (git-ignored) by `make capdb-fetch`, which clones or
@@ -123,7 +123,7 @@ dist: build bootstrap-alpine
 	cp $(DIST_STORE)/images/alpine.cap $(DIST_DIR)/alpine.cap
 
 web:
-	cd $(CAPPERWEB_DIR) && scripts/build.sh
+	cd $(CAPPERWEB_DIR) && VITE_CAPPER_VERSION=$(CAPPER_VERSION) scripts/build.sh
 
 # ── Service management ────────────────────────────────────────────────────────
 
@@ -183,6 +183,9 @@ docs-md:
 
 docs-web:
 	go run ./tools/docgen web
+
+docs-screenshots:
+	scripts/docs-screenshots.sh
 
 docs-pdf:
 	go run ./tools/docgen pdf

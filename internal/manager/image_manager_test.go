@@ -18,6 +18,15 @@ import (
 	"capper/internal/types"
 )
 
+func testNetworkOpts() *NetworkRunOpts {
+	return &NetworkRunOpts{
+		NetworkID: "test-subnet",
+		Bridge:    "capbr-test",
+		Subnet:    "10.99.0.0/24",
+		Gateway:   "10.99.0.1",
+	}
+}
+
 func TestImageCreateAndLoad(t *testing.T) {
 	root := t.TempDir()
 	st, err := store.Open(store.NewPaths(filepath.Join(root, "store")))
@@ -111,7 +120,7 @@ func TestRunOneShotCapsuleBecomesStopped(t *testing.T) {
 		Loader: loader.Loader{Paths: st.Paths},
 		Runner: runtime.Runner{Mode: runtime.ModeBwrap},
 	}
-	inst, err := instMgr.Run("oneshot.cap", types.ResourceOverrides{}, RunOptions{})
+	inst, err := instMgr.Run("oneshot.cap", types.ResourceOverrides{}, RunOptions{Network: testNetworkOpts()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +186,7 @@ func TestRunFailedStartIsVisibleInStore(t *testing.T) {
 		Loader: loader.Loader{Paths: st.Paths},
 		Runner: runtime.Runner{Mode: runtime.ModeBwrap},
 	}
-	_, err = instMgr.Run("broken.cap", types.ResourceOverrides{}, RunOptions{})
+	_, err = instMgr.Run("broken.cap", types.ResourceOverrides{}, RunOptions{Network: testNetworkOpts()})
 	if err == nil {
 		t.Fatal("expected run failure")
 	}
@@ -232,7 +241,7 @@ func TestRemoveFailedInstanceReleasesQuotaUsage(t *testing.T) {
 		Loader: loader.Loader{Paths: st.Paths},
 		Runner: runtime.Runner{Mode: runtime.ModeBwrap},
 	}
-	if _, err := instMgr.Run("quota-broken.cap", types.ResourceOverrides{}, RunOptions{}); err == nil {
+	if _, err := instMgr.Run("quota-broken.cap", types.ResourceOverrides{}, RunOptions{Network: testNetworkOpts()}); err == nil {
 		t.Fatal("expected run failure")
 	}
 	if err := st.Billing.CheckQuota("default", "instance"); err == nil {

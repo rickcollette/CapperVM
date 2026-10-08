@@ -45,6 +45,7 @@ type RunOptions struct {
 	Labels        map[string]string   // metadata labels attached to the instance at launch
 	Entrypoint    []string            // optional entrypoint override
 	Args          []string            // optional args override (used with Entrypoint)
+	RuntimeMode   string              // optional per-instance runtime; empty → host default
 }
 
 // setupInstanceDisk provisions the instance's size-capped upper layer. When an
@@ -64,7 +65,7 @@ func (m InstanceManager) setupInstanceDisk(instID, instDir string, diskBytes int
 		}
 	}
 	if poolID == "" {
-		return diskquota.SetupOverlay(instDir, diskBytes)
+		return fmt.Errorf("no default storage pool configured: register one under Admin → Storage")
 	}
 	hs := hoststorage.NewManager(m.Store.HostStorage)
 	alloc, err := hs.Allocate(hoststorage.AllocateOptions{
@@ -103,19 +104,9 @@ func (m InstanceManager) Run(imageName string, resources types.ResourceOverrides
 		return nil, err
 	}
 
-	// Universal metadata reachability: the metadata service (169.254.169.254) is
-	// routed to instances via a network gateway, so every instance needs a
-	// network. When the caller requests none, attach the "default" network if it
-	// exists, so a plain instance can still reach metadata (capinit, hostname).
-	if opts.Network == nil && m.Store.Networks != nil {
-		if n, nerr := m.Store.Networks.Get("default", project); nerr == nil && n.Bridge != "" {
-			opts.Network = &NetworkRunOpts{
-				NetworkID: n.ID,
-				Bridge:    n.Bridge,
-				Subnet:    n.Subnet,
-				Gateway:   n.Gateway,
-			}
-		}
+	// Every instance must launch into a VPC subnet for metadata reachability.
+	if opts.Network == nil {
+		return nil, fmt.Errorf("subnet is required: instances must launch into a VPC subnet")
 	}
 
 	loaded, cleanup, err := m.Loader.Load(imageName)
@@ -200,6 +191,12 @@ func (m InstanceManager) Run(imageName string, resources types.ResourceOverrides
 		Resources:     effectiveResources,
 		RestartPolicy: restartPolicy,
 	}
+	runtimeMode := runtime.ResolvePreferred(opts.RuntimeMode, loaded.Manifest.PreferredRuntime, m.Runner.Mode)
+	if err := runtime.ValidateMode(runtimeMode); err != nil {
+		_ = os.RemoveAll(instDir)
+		return nil, err
+	}
+	inst.RuntimeMode = runtimeMode
 	if img, err := m.Store.GetImage(imageBase); err == nil {
 		inst.ImageID = img.ID
 	}
@@ -264,8 +261,18 @@ func (m InstanceManager) Run(imageName string, resources types.ResourceOverrides
 	// Record instance quota usage (best-effort; never fail launch on billing error).
 	_ = m.Store.Billing.RecordUsage(project, "instance", id, "count", 1)
 
-	pid, err := m.Runner.Start(id, instDir, loaded.Manifest, runtime.StartOptions{NetNS: startNetNS})
+	rt := m.resolveRuntime(inst.RuntimeMode)
+	if inst.RuntimeMode == runtime.ModeQEMU && opts.Network != nil && opts.Network.Bridge != "" {
+		tapName := network.TAPName(id)
+		if terr := network.CreateTAPOnBridge(opts.Network.Bridge, tapName); terr != nil {
+			fmt.Fprintf(os.Stderr, "instance %s: create qemu tap: %v\n", id, terr)
+		} else {
+			_ = network.WriteTAPName(instDir, tapName)
+		}
+	}
+	pid, err := rt.Start(id, instDir, loaded.Manifest, runtime.StartOptions{NetNS: startNetNS})
 	if err != nil {
+		_ = network.DeleteTAP(network.TAPName(id))
 		if startNetNS != "" {
 			_ = network.TeardownInstanceNetNS(id)
 			hostVeth, _ := network.VethNames(id)
@@ -376,7 +383,7 @@ func (m InstanceManager) Exec(ref string, command []string) error {
 	if inst.Status != types.StatusRunning {
 		return fmt.Errorf("instance is not running: %s\n\nStatus:\n  %s", ref, inst.Status)
 	}
-	return m.Runner.Exec(inst.ID, inst.RootFSPath, instNetNS(inst), command, inst.User)
+	return m.resolveRuntime(inst.RuntimeMode).Exec(inst.ID, inst.RootFSPath, instNetNS(inst), command, inst.User)
 }
 
 // StartShellPTY opens an interactive shell with a PTY for WebSocket terminal
@@ -394,7 +401,7 @@ func (m InstanceManager) StartShellPTY(ref, term string) (*exec.Cmd, *os.File, e
 		return nil, nil, fmt.Errorf("instance is not running: %s", ref)
 	}
 	shell := runtime.PickShell(inst.RootFSPath, inst.Shell)
-	return m.Runner.StartShellPTY(inst.ID, inst.RootFSPath, shell, instNetNS(inst), inst.User, term)
+	return m.resolveRuntime(inst.RuntimeMode).StartShellPTY(inst.ID, inst.RootFSPath, shell, instNetNS(inst), inst.User, term)
 }
 
 func startupError(instDir string) string {
@@ -429,7 +436,7 @@ func (m InstanceManager) Connect(ref string) error {
 		shells = append(shells, inst.Shell)
 	}
 	shells = append(shells, "/bin/sh", "/bin/bash", "/busybox/sh")
-	return m.Runner.Connect(inst.ID, inst.RootFSPath, instNetNS(inst), unique(shells), inst.User)
+	return m.resolveRuntime(inst.RuntimeMode).Connect(inst.ID, inst.RootFSPath, instNetNS(inst), unique(shells), inst.User)
 }
 
 // instNetNS returns the named network namespace for the instance, or "" if none.
@@ -464,7 +471,7 @@ func (m InstanceManager) Stop(ref string, timeout time.Duration, killNow bool) (
 	if inst.Status != types.StatusRunning {
 		return inst, false, nil
 	}
-	if err := m.Runner.Stop(inst.ID, inst.PID, timeout, killNow); err != nil {
+	if err := m.resolveRuntime(inst.RuntimeMode).Stop(inst.ID, inst.PID, timeout, killNow); err != nil {
 		return nil, false, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -504,6 +511,7 @@ func injectResolvConf(rootfs, dnsIP string) {
 // detachNetwork tears down the named netns and veth pair for an instance that
 // was attached to a network, and releases its IPAM lease.
 func (m InstanceManager) detachNetwork(inst *types.Instance) {
+	_ = network.DeleteTAP(network.TAPName(inst.ID))
 	_ = network.TeardownInstanceNetNS(inst.ID)
 	hostVeth, _ := network.VethNames(inst.ID)
 	_ = network.DeleteVeth(hostVeth)
@@ -531,4 +539,11 @@ func unique(values []string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+func (m InstanceManager) resolveRuntime(mode string) runtime.Runtime {
+	if mode == "" {
+		mode = m.Runner.Mode
+	}
+	return runtime.Resolve(mode)
 }

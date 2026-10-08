@@ -225,6 +225,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/instances/{id}/start", s.handleStartInstance)
 	s.mux.HandleFunc("POST /api/v1/instances/{id}/stop", s.handleStopInstance)
 	s.mux.HandleFunc("POST /api/v1/instances/{id}/restart", s.handleRestartInstance)
+	s.mux.HandleFunc("POST /api/v1/instances/{id}/reboot", s.handleRebootInstance)
+	s.mux.HandleFunc("POST /api/v1/instances/{id}/protect-termination", s.handleProtectTermination)
+	s.mux.HandleFunc("DELETE /api/v1/instances/{id}/protect-termination", s.handleUnprotectTermination)
+	s.mux.HandleFunc("POST /api/v1/instances/{id}/attach-network-interface", s.handleAttachENIToInstance)
+	s.mux.HandleFunc("POST /api/v1/instances/{id}/detach-network-interface", s.handleDetachENIFromInstance)
 	s.mux.HandleFunc("GET /api/v1/instances/{id}/logs", s.handleInstanceLogs)
 	s.mux.HandleFunc("GET /api/v1/instances/{id}/logs/stdout", s.handleInstanceLogStdout)
 	s.mux.HandleFunc("GET /api/v1/instances/{id}/logs/stderr", s.handleInstanceLogStderr)
@@ -252,6 +257,52 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/capsule-types/{name}/audit", s.handleCapsuleTypeAudit)
 	s.mux.HandleFunc("POST /api/v1/capsule-types/{name}/deprecate", s.handleDeprecateCapsuleType)
 	s.mux.HandleFunc("DELETE /api/v1/capsule-types/{name}", s.handleDeleteCapsuleType)
+	// instance-types alias (Instances spec)
+	s.mux.HandleFunc("GET /api/v1/instance-types", s.handleListCapsuleTypes)
+	s.mux.HandleFunc("GET /api/v1/instance-types/{name}", s.handleGetCapsuleType)
+
+	// Key pairs
+	s.mux.HandleFunc("GET /api/v1/key-pairs", s.handleListKeyPairs)
+	s.mux.HandleFunc("POST /api/v1/key-pairs", s.handleCreateKeyPair)
+	s.mux.HandleFunc("GET /api/v1/key-pairs/{keyName}", s.handleGetKeyPair)
+	s.mux.HandleFunc("DELETE /api/v1/key-pairs/{keyName}", s.handleDeleteKeyPair)
+
+	// Launch templates
+	s.mux.HandleFunc("GET /api/v1/launch-templates", s.handleListLaunchTemplates)
+	s.mux.HandleFunc("POST /api/v1/launch-templates", s.handleCreateLaunchTemplate)
+	s.mux.HandleFunc("GET /api/v1/launch-templates/{templateId}", s.handleGetLaunchTemplate)
+	s.mux.HandleFunc("GET /api/v1/launch-templates/{templateId}/versions", s.handleListLaunchTemplateVersions)
+	s.mux.HandleFunc("POST /api/v1/launch-templates/{templateId}/versions", s.handleCreateLaunchTemplateVersion)
+
+	// Reachability + advanced networking
+	s.mux.HandleFunc("POST /api/v1/reachability/analyze", s.handleAnalyzeReachability)
+	s.mux.HandleFunc("GET /api/v1/vpc-endpoints", s.handleListVpcEndpoints)
+	s.mux.HandleFunc("POST /api/v1/vpc-endpoints", s.handleCreateVpcEndpoint)
+	s.mux.HandleFunc("GET /api/v1/vpc-peerings", s.handleListVpcPeerings)
+	s.mux.HandleFunc("POST /api/v1/vpc-peerings", s.handleCreateVpcPeering)
+	s.mux.HandleFunc("GET /api/v1/flow-logs", s.handleListFlowLogs)
+	s.mux.HandleFunc("POST /api/v1/flow-logs", s.handleCreateFlowLog)
+	s.mux.HandleFunc("GET /api/v1/networking/topology", s.handleNetworkTopologyGraph)
+	s.mux.HandleFunc("GET /api/v1/networking/dashboard", s.handleNetworkingDashboard)
+	s.mux.HandleFunc("GET /api/v1/networking/drift", s.handleNetworkingDrift)
+
+	// LB target groups + listeners
+	s.mux.HandleFunc("GET /api/v1/target-groups", s.handleListTargetGroups)
+	s.mux.HandleFunc("POST /api/v1/target-groups", s.handleCreateTargetGroup)
+	s.mux.HandleFunc("GET /api/v1/subnets/{id}/available-ips", s.handleSubnetAvailableIPs)
+	s.mux.HandleFunc("GET /api/v1/lb/{name}/listeners", s.handleListLBListeners)
+	s.mux.HandleFunc("POST /api/v1/lb/{name}/listeners", s.handleCreateLBListener)
+	s.mux.HandleFunc("GET /api/v1/lb/{name}/listeners/{id}", s.handleGetLBListener)
+	s.mux.HandleFunc("PATCH /api/v1/lb/{name}/listeners/{id}", s.handleUpdateLBListener)
+	s.mux.HandleFunc("DELETE /api/v1/lb/{name}/listeners/{id}", s.handleDeleteLBListener)
+	s.mux.HandleFunc("POST /api/v1/lb/{name}/listeners/{id}/certificates", s.handleAttachListenerCert)
+	s.mux.HandleFunc("DELETE /api/v1/lb/{name}/listeners/{id}/certificates", s.handleDetachListenerCert)
+	s.mux.HandleFunc("GET /api/v1/lb/{name}/target-groups", s.handleGetLBTargetGroups)
+	s.mux.HandleFunc("POST /api/v1/lb/{name}/target-groups", s.handleCreateLBTargetGroup)
+	s.mux.HandleFunc("DELETE /api/v1/lb/{name}/target-groups/{tgId}", s.handleDeleteLBTargetGroup)
+	s.mux.HandleFunc("GET /api/v1/lb/{name}/target-groups/{tgId}/targets", s.handleListLBTargets)
+	s.mux.HandleFunc("POST /api/v1/lb/{name}/target-groups/{tgId}/targets", s.handleAddLBTarget)
+	s.mux.HandleFunc("DELETE /api/v1/lb/{name}/target-groups/{tgId}/targets/{targetId}", s.handleRemoveLBTarget)
 
 	s.mux.HandleFunc("GET /api/v1/marketplace/images", s.handleMarketplaceImages)
 	s.mux.HandleFunc("GET /api/v1/marketplace/images/{id}", s.handleMarketplaceImage)
@@ -284,19 +335,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/storage/volumes/{name}/detach", s.handleDetachVolume)
 	s.mux.HandleFunc("DELETE /api/v1/storage/volumes/{name}", s.handleDeleteVolume)
 
-	s.mux.HandleFunc("GET /api/v1/networks", s.handleListNetworks)
-	s.mux.HandleFunc("POST /api/v1/networks", s.handleCreateNetwork)
-	s.mux.HandleFunc("GET /api/v1/networks/{name}", s.handleGetNetwork)
-	s.mux.HandleFunc("DELETE /api/v1/networks/{name}", s.handleDeleteNetwork)
-	s.mux.HandleFunc("POST /api/v1/networks/{name}/attach/{instance}", s.handleAttachNetwork)
-	s.mux.HandleFunc("POST /api/v1/networks/{name}/detach/{instance}", s.handleDetachNetwork)
-
 	s.mux.HandleFunc("GET /api/v1/dns/zones", s.handleListDNSZones)
 	s.mux.HandleFunc("POST /api/v1/dns/zones", s.handleCreateDNSZone)
 	s.mux.HandleFunc("GET /api/v1/dns/zones/{zone}", s.handleGetDNSZone)
 	s.mux.HandleFunc("DELETE /api/v1/dns/zones/{zone}", s.handleDeleteDNSZone)
 	s.mux.HandleFunc("POST /api/v1/dns/zones/{zone}/records", s.handleCreateDNSRecord)
 	s.mux.HandleFunc("DELETE /api/v1/dns/zones/{zone}/records/{id}", s.handleDeleteDNSRecord)
+	s.mux.HandleFunc("GET /api/v1/dns/zones/{zone}/vpc-associations", s.handleListDNSZoneVPCs)
+	s.mux.HandleFunc("POST /api/v1/dns/zones/{zone}/vpc-associations", s.handleAssociateDNSZoneVPC)
+	s.mux.HandleFunc("DELETE /api/v1/dns/zones/{zone}/vpc-associations", s.handleDisassociateDNSZoneVPC)
 	s.mux.HandleFunc("POST /api/v1/dns/query", s.handleDNSQuery)
 
 	s.mux.HandleFunc("GET /api/v1/capinit/status", s.handleCapInitStatus)
@@ -512,16 +559,71 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/service-nodes", s.handleListServiceNodes)
 	s.mux.HandleFunc("GET /api/v1/service-nodes/{role}", s.handleGetServiceNodesByRole)
 
-	// Topology: VPCs
-	s.mux.HandleFunc("GET /api/v1/vpcs", s.handleListVPCs)
-	s.mux.HandleFunc("POST /api/v1/vpcs", s.handleCreateVPC)
-	s.mux.HandleFunc("GET /api/v1/vpcs/{vpc}", s.handleGetVPC)
-	s.mux.HandleFunc("PATCH /api/v1/vpcs/{vpc}", s.handlePatchVPC)
-	s.mux.HandleFunc("DELETE /api/v1/vpcs/{vpc}", s.handleDeleteVPC)
-	s.mux.HandleFunc("GET /api/v1/vpcs/{vpc}/subnets", s.handleListVPCSubnets)
-	s.mux.HandleFunc("POST /api/v1/vpcs/{vpc}/subnets", s.handleCreateVPCSubnet)
+	// VPC (canonical unified model)
+	s.mux.HandleFunc("GET /api/v1/vpcs", s.handleListVPCsUnified)
+	s.mux.HandleFunc("POST /api/v1/vpcs", s.handleCreateVPCUnified)
+	s.mux.HandleFunc("GET /api/v1/vpcs/{vpc}", s.handleGetVPCUnified)
+	s.mux.HandleFunc("PATCH /api/v1/vpcs/{vpc}", s.handlePatchVPCUnified)
+	s.mux.HandleFunc("DELETE /api/v1/vpcs/{vpc}", s.handleDeleteVPCUnified)
+	s.mux.HandleFunc("GET /api/v1/vpcs/{vpc}/summary", s.handleVPCSummary)
+	s.mux.HandleFunc("GET /api/v1/vpcs/{vpc}/detail", s.handleVPCDetail)
+	s.mux.HandleFunc("GET /api/v1/vpcs/{vpc}/dependencies", s.handleVPCDependencies)
+	s.mux.HandleFunc("GET /api/v1/subnets/{subnetId}/dependencies", s.handleSubnetDependencies)
+	s.mux.HandleFunc("GET /api/v1/vpcs/{vpc}/subnets", s.handleListVPCSubnetsUnified)
+	s.mux.HandleFunc("POST /api/v1/vpcs/{vpc}/subnets", s.handleCreateVPCSubnetUnified)
+	s.mux.HandleFunc("GET /api/v1/vpcs/{vpc}/route-tables", s.handleListRouteTables)
+	s.mux.HandleFunc("POST /api/v1/vpcs/{vpc}/route-tables", s.handleCreateRouteTable)
+	// Legacy topology flat routes (compat)
 	s.mux.HandleFunc("GET /api/v1/vpcs/{vpc}/routes", s.handleListVPCRoutes)
 	s.mux.HandleFunc("POST /api/v1/vpcs/{vpc}/routes", s.handleCreateVPCRoute)
+
+	s.mux.HandleFunc("GET /api/v1/subnets/{subnetId}", s.handleGetSubnet)
+	s.mux.HandleFunc("PATCH /api/v1/subnets/{subnetId}", s.handlePatchSubnet)
+	s.mux.HandleFunc("DELETE /api/v1/subnets/{subnetId}", s.handleDeleteSubnet)
+	s.mux.HandleFunc("POST /api/v1/subnets/{subnetId}/associate-route-table", s.handleAssociateSubnetRouteTable)
+
+	s.mux.HandleFunc("GET /api/v1/route-tables/{routeTableId}", s.handleGetRouteTable)
+	s.mux.HandleFunc("POST /api/v1/route-tables/{routeTableId}/routes", s.handleAddRoute)
+	s.mux.HandleFunc("DELETE /api/v1/route-tables/{routeTableId}/routes/{routeId}", s.handleDeleteRoute)
+
+	s.mux.HandleFunc("GET /api/v1/security-groups", s.handleListSecurityGroups)
+	s.mux.HandleFunc("POST /api/v1/security-groups", s.handleCreateSecurityGroup)
+	s.mux.HandleFunc("GET /api/v1/security-groups/{sgId}", s.handleGetSecurityGroup)
+	s.mux.HandleFunc("DELETE /api/v1/security-groups/{sgId}", s.handleDeleteSecurityGroup)
+	s.mux.HandleFunc("POST /api/v1/security-groups/{sgId}/rules", s.handleAddSGRule)
+	s.mux.HandleFunc("DELETE /api/v1/security-group-rules/{ruleId}", s.handleDeleteSGRule)
+
+	s.mux.HandleFunc("GET /api/v1/internet-gateways", s.handleListIGWs)
+	s.mux.HandleFunc("POST /api/v1/internet-gateways", s.handleCreateIGW)
+	s.mux.HandleFunc("DELETE /api/v1/internet-gateways/{igwId}", s.handleDeleteIGW)
+
+	s.mux.HandleFunc("GET /api/v1/nat-gateways", s.handleListNATGateways)
+	s.mux.HandleFunc("POST /api/v1/nat-gateways", s.handleCreateNATGateway)
+	s.mux.HandleFunc("GET /api/v1/nat-gateways/{natId}", s.handleGetNATGateway)
+	s.mux.HandleFunc("DELETE /api/v1/nat-gateways/{natId}", s.handleDeleteNATGateway)
+
+	s.mux.HandleFunc("GET /api/v1/network-acls", s.handleListNetworkACLs)
+	s.mux.HandleFunc("POST /api/v1/network-acls", s.handleCreateNetworkACL)
+	s.mux.HandleFunc("GET /api/v1/network-acls/{aclId}", s.handleGetNetworkACL)
+	s.mux.HandleFunc("DELETE /api/v1/network-acls/{aclId}", s.handleDeleteNetworkACL)
+	s.mux.HandleFunc("POST /api/v1/network-acls/{aclId}/entries", s.handleAddNetworkACLEntry)
+	s.mux.HandleFunc("DELETE /api/v1/network-acls/{aclId}/entries/{ruleNumber}", s.handleDeleteNetworkACLEntry)
+
+	// ENIs
+	s.mux.HandleFunc("GET /api/v1/network-interfaces", s.handleListENIs)
+	s.mux.HandleFunc("POST /api/v1/network-interfaces", s.handleCreateENI)
+	s.mux.HandleFunc("GET /api/v1/network-interfaces/{eniId}", s.handleGetENI)
+	s.mux.HandleFunc("DELETE /api/v1/network-interfaces/{eniId}", s.handleDeleteENI)
+	s.mux.HandleFunc("POST /api/v1/network-interfaces/{eniId}/attach", s.handleAttachENI)
+	s.mux.HandleFunc("POST /api/v1/network-interfaces/{eniId}/detach", s.handleDetachENI)
+	s.mux.HandleFunc("POST /api/v1/network-interfaces/{eniId}/private-ips", s.handleAssignENIPrivateIP)
+
+	// Public IP aliases
+	s.mux.HandleFunc("GET /api/v1/public-ips", s.handleListPublicIPs)
+	s.mux.HandleFunc("POST /api/v1/public-ips/allocate", s.handleAllocatePublicIP)
+	s.mux.HandleFunc("POST /api/v1/public-ips/{allocationId}/associate", s.handleAssociatePublicIP)
+	s.mux.HandleFunc("POST /api/v1/public-ips/{associationId}/disassociate", s.handleDisassociatePublicIP)
+	s.mux.HandleFunc("DELETE /api/v1/public-ips/{allocationId}", s.handleReleasePublicIP)
 
 	// Topology: placement policies
 	s.mux.HandleFunc("GET /api/v1/placement/policies", s.handleListPlacementPolicies)
@@ -628,7 +730,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/alerts/{id}/resolve", s.handleResolveAlert)
 	// Service-specific monitoring (§6.6): latest metrics + recent events per resource.
 	s.mux.HandleFunc("GET /api/v1/instances/{id}/monitoring", s.monitoringHandler("instance"))
-	s.mux.HandleFunc("GET /api/v1/networks/{id}/monitoring", s.monitoringHandler("network"))
 	s.mux.HandleFunc("GET /api/v1/nodes/{id}/monitoring", s.monitoringHandler("node"))
 	s.mux.HandleFunc("GET /api/v1/load-balancers/{id}/monitoring", s.monitoringHandler("load-balancer"))
 	s.mux.HandleFunc("GET /api/v1/certificates/{id}/monitoring", s.monitoringHandler("certificate"))
@@ -767,16 +868,43 @@ func (s *Server) staticHandler() http.Handler {
 			serveIndex(w, r)
 			return
 		}
-		full := filepath.Join(root, filepath.Clean(path))
-		if !strings.HasPrefix(full, filepath.Clean(root)) {
+		// Reject traversal without treating filepath.Clean as a sanitizer.
+		if strings.Contains(path, "..") {
 			http.NotFound(w, r)
 			return
 		}
-		if _, err := os.Stat(full); os.IsNotExist(err) {
+		rel := strings.TrimPrefix(path, "/")
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		absFull, err := filepath.Abs(full)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		sep := string(os.PathSeparator)
+		if absFull != absRoot && !strings.HasPrefix(absFull, absRoot+sep) {
+			http.NotFound(w, r)
+			return
+		}
+		st, err := os.Stat(absFull)
+		if os.IsNotExist(err) {
 			serveIndex(w, r)
 			return
 		}
-		http.FileServer(http.Dir(root)).ServeHTTP(w, r)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if st.IsDir() {
+			// SPA fallback — never expose directory listings.
+			serveIndex(w, r)
+			return
+		}
+		http.ServeFile(w, r, absFull)
 	})
 }
 

@@ -1,6 +1,7 @@
 package marketplace
 
 import (
+	"capper/internal/iox"
 	"archive/tar"
 	"bytes"
 	"context"
@@ -463,7 +464,7 @@ func walkTarEntries(path string, limit int64, visit func(name string, data []byt
 			continue
 		}
 		if hdr.Size > limit {
-			if _, err := io.Copy(io.Discard, tr); err != nil {
+			if _, err := iox.CopyLimited(io.Discard, tr, iox.DefaultMaxArchiveEntry); err != nil {
 				return err
 			}
 			continue

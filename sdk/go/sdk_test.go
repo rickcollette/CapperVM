@@ -13,11 +13,15 @@ import (
 	"time"
 
 	cappersdk "capper/sdk/go"
+	"capper/internal/adminconfig"
 	"capper/internal/api"
 	"capper/internal/controller"
+	"capper/internal/hoststorage"
 	"capper/internal/manager"
+	"capper/internal/network"
 	"capper/internal/store"
 	"capper/internal/types"
+	"capper/internal/vpc"
 )
 
 var ctx = context.Background()
@@ -128,7 +132,53 @@ func buildTestCapsule(t *testing.T, st *store.Store, name string) string {
 	if _, err := mgr.Create(capFile, configPath); err != nil {
 		t.Fatalf("buildTestCapsule Create: %v", err)
 	}
-	return capFile
+	return name + ".cap"
+}
+
+// bootstrapLaunchPrereqs creates a VPC subnet and default storage pool required
+// for instance and volume APIs.
+func bootstrapLaunchPrereqs(t *testing.T, env *testEnv) string {
+	t.Helper()
+	v, err := env.Store.VPC.CreateVPCExtended(vpc.CreateVPCOptions{
+		Project: "default",
+		Name:    "sdk-vpc",
+		Slug:    "sdk-vpc",
+		CIDR:    "10.77.0.0/16",
+	})
+	if err != nil {
+		t.Fatalf("bootstrap vpc: %v", err)
+	}
+	sub, err := env.Store.VPC.CreateSubnetExtended(vpc.CreateSubnetOptions{
+		VPCID: v.ID,
+		Name:  "sdk-subnet",
+		Slug:  "sdk-subnet",
+		CIDR:  "10.77.1.0/24",
+		Kind:  vpc.SubnetPrivate,
+	})
+	if err != nil {
+		t.Fatalf("bootstrap subnet: %v", err)
+	}
+	gw, err := network.GatewayForSubnet(sub.CIDR)
+	if err != nil {
+		t.Fatalf("bootstrap gateway: %v", err)
+	}
+	if err := env.Store.VPC.UpdateSubnetBridge(sub.ID, network.BridgeName(sub.Name), gw); err != nil {
+		t.Fatalf("bootstrap subnet bridge: %v", err)
+	}
+	poolDir := filepath.Join(env.Store.Paths.Root, "sdk-pool")
+	if err := os.MkdirAll(poolDir, 0o755); err != nil {
+		t.Fatalf("bootstrap pool dir: %v", err)
+	}
+	pool, err := hoststorage.NewManager(env.Store.HostStorage).CreatePool(hoststorage.CreatePoolOptions{
+		Name: "sdk-pool", Backend: hoststorage.BackendDirectory, Mountpoint: poolDir, TotalBytes: 10 * 1024 * 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatalf("bootstrap pool: %v", err)
+	}
+	if err := env.Store.AdminConfig.Set(adminconfig.KeyDefaultInstancePool, pool.ID); err != nil {
+		t.Fatalf("bootstrap pool default: %v", err)
+	}
+	return sub.ID
 }
 
 // containsID returns true if any element in list has the given ID field.
@@ -148,11 +198,13 @@ func TestInstanceLifecycle(t *testing.T) {
 	c := env.Client
 
 	imgRef := buildTestCapsule(t, env.Store, "alpine")
+	subnetID := bootstrapLaunchPrereqs(t, env)
 
 	// Create
 	inst, err := c.Instances.Create(ctx, cappersdk.CreateInstanceRequest{
-		Name:  "test-vm",
-		Image: imgRef,
+		Name:     "test-vm",
+		Image:    imgRef,
+		SubnetID: subnetID,
 	})
 	if err != nil {
 		t.Fatalf("Instances.Create: %v", err)
@@ -204,9 +256,24 @@ func TestInstanceLifecycle(t *testing.T) {
 	}
 }
 
-// ---- Network lifecycle -------------------------------------------------------
+// ---- VPC prerequisites (legacy flat networks removed) ------------------------
+
+func TestVPCSubnetBootstrap(t *testing.T) {
+	env := newTestEnv(t)
+	subnetID := bootstrapLaunchPrereqs(t, env)
+	if subnetID == "" {
+		t.Fatal("expected subnet id")
+	}
+	vpcs, err := env.Store.VPC.ListVPCs("default")
+	if err != nil || len(vpcs) == 0 {
+		t.Fatalf("ListVPCs: %v", err)
+	}
+}
+
+// ---- Network lifecycle (removed) ----------------------------------------------
 
 func TestNetworkLifecycle(t *testing.T) {
+	t.Skip("legacy /api/v1/networks API removed — use VPC subnets")
 	c := newTestServer(t)
 
 	// Create
@@ -325,13 +392,16 @@ func TestDNSLifecycle(t *testing.T) {
 // ---- Load Balancer lifecycle ------------------------------------------------
 
 func TestLBLifecycle(t *testing.T) {
-	c := newTestServer(t)
+	env := newTestEnv(t)
+	c := env.Client
+	subnetID := bootstrapLaunchPrereqs(t, env)
 
 	// Create
 	lb, err := c.LB.Create(ctx, cappersdk.CreateLBRequest{
-		Name:    "api-lb",
-		Mode:    "http",
-		Project: "default",
+		Name:     "api-lb",
+		SubnetID: subnetID,
+		Mode:     "http",
+		Project:  "default",
 	})
 	if err != nil {
 		t.Fatalf("LB.Create: %v", err)
@@ -563,12 +633,14 @@ func TestPagination(t *testing.T) {
 	c := env.Client
 
 	imgRef := buildTestCapsule(t, env.Store, "busybox")
+	subnetID := bootstrapLaunchPrereqs(t, env)
 
 	// Seed 15 instances (keep low to avoid slow test from actual process launch)
 	for i := range 15 {
 		_, err := c.Instances.Create(ctx, cappersdk.CreateInstanceRequest{
-			Name:  fmt.Sprintf("vm-%02d", i),
-			Image: imgRef,
+			Name:     fmt.Sprintf("vm-%02d", i),
+			Image:    imgRef,
+			SubnetID: subnetID,
 		})
 		if err != nil {
 			t.Fatalf("Create vm-%02d: %v", i, err)

@@ -9,15 +9,17 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 )
 
-// HTTPProxy is a reverse-proxy load balancer for ModeHTTP load balancers.
+// HTTPProxy is a reverse-proxy load balancer for HTTP/HTTPS listeners.
 type HTTPProxy struct {
-	lb           LoadBalancer
+	spec         ProxySpec
 	store        *Store
 	certResolver CertResolver
+	acmeHandler  ACMEChallengeHandler
 	logPath      string
 	srv          *http.Server
 	cursor       uint64
@@ -27,8 +29,8 @@ type HTTPProxy struct {
 	ActiveConns   atomic.Int64
 }
 
-func newHTTPProxy(lb LoadBalancer, store *Store, certRes CertResolver, logPath string) *HTTPProxy {
-	return &HTTPProxy{lb: lb, store: store, certResolver: certRes, logPath: logPath}
+func newHTTPProxy(spec ProxySpec, store *Store, certRes CertResolver, acme ACMEChallengeHandler, logPath string) *HTTPProxy {
+	return &HTTPProxy{spec: spec, store: store, certResolver: certRes, acmeHandler: acme, logPath: logPath}
 }
 
 func (p *HTTPProxy) Start(ctx context.Context) error {
@@ -44,7 +46,7 @@ func (p *HTTPProxy) Start(ctx context.Context) error {
 	}
 
 	rp := &httputil.ReverseProxy{
-		Director: p.director,
+		Rewrite: p.rewrite,
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{Timeout: dialTimeout}).DialContext,
 		},
@@ -69,16 +71,19 @@ func (p *HTTPProxy) Start(ctx context.Context) error {
 		},
 	}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var rootHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p.TotalRequests.Add(1)
 		p.ActiveConns.Add(1)
 		defer p.ActiveConns.Add(-1)
 		rp.ServeHTTP(w, r)
 	})
+	if p.acmeHandler != nil {
+		rootHandler = wrapACMEHandler(rootHandler, p.acmeHandler)
+	}
 
 	p.srv = &http.Server{
-		Addr:        p.lb.ListenAddr,
-		Handler:     handler,
+		Addr:        p.spec.ListenAddr,
+		Handler:     rootHandler,
 		ReadTimeout: 30 * time.Second,
 	}
 
@@ -87,18 +92,26 @@ func (p *HTTPProxy) Start(ctx context.Context) error {
 		_ = p.srv.Close()
 	}()
 
-	if p.lb.TLSCertName != "" && p.certResolver != nil {
-		cert, key, err := p.certResolver(p.lb.TLSCertName)
+	useTLS := p.spec.TLSCertName != "" || p.spec.Mode == ModeHTTPS
+	if useTLS && p.certResolver != nil {
+		cert, key, err := p.certResolver(p.spec.TLSCertName)
 		if err == nil {
 			tlsCert, err := tls.X509KeyPair(cert, key)
 			if err == nil {
-				p.srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{tlsCert}}
+				p.srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{tlsCert}}
 				if err := p.srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 					return err
 				}
 				return nil
 			}
 		}
+		if p.spec.Mode == ModeHTTPS {
+			return fmt.Errorf("lb %q: https mode requires a valid TLS certificate", p.spec.LB.Name)
+		}
+	}
+
+	if p.spec.Mode == ModeHTTPS {
+		return fmt.Errorf("lb %q: https mode requires tlsCertName and cert resolver", p.spec.LB.Name)
 	}
 
 	if err := p.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -107,35 +120,48 @@ func (p *HTTPProxy) Start(ctx context.Context) error {
 	return nil
 }
 
+func wrapACMEHandler(next http.Handler, acme ACMEChallengeHandler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
+			acme(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (p *HTTPProxy) Stop() {
 	if p.cancel != nil {
 		p.cancel()
 	}
 }
 
-func (p *HTTPProxy) director(req *http.Request) {
-	backends, err := p.store.ListBackends(p.lb.ID)
-	if err != nil || len(backends) == 0 {
+func (p *HTTPProxy) rewrite(pr *httputil.ProxyRequest) {
+	var addrs []string
+	var err error
+	if p.spec.TargetGroupID != "" {
+		addrs, err = p.store.ListTargetAddresses(p.spec.TargetGroupID)
+	} else {
+		var backends []Backend
+		backends, err = p.store.ListBackends(p.spec.LB.ID)
+		for _, b := range backends {
+			addrs = append(addrs, b.Address)
+		}
+	}
+	if err != nil || len(addrs) == 0 {
 		return
 	}
 	var addr string
-	if p.lb.Algorithm == AlgoLeastConnections {
-		// HTTP proxy doesn't track per-backend connection counts here;
-		// fall back to round-robin as an approximation.
-		addr = backends[0].Address
+	if p.spec.LB.Algorithm == AlgoLeastConnections {
+		addr = addrs[0]
 	} else {
 		idx := atomic.AddUint64(&p.cursor, 1) - 1
-		addr = backends[int(idx)%len(backends)].Address
+		addr = addrs[int(idx)%len(addrs)]
 	}
 	target, err := url.Parse("http://" + addr)
 	if err != nil {
 		return
 	}
-	req.URL.Scheme = target.Scheme
-	req.URL.Host = target.Host
-	if req.Header.Get("X-Forwarded-For") == "" {
-		if host, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
-			req.Header.Set("X-Forwarded-For", host)
-		}
-	}
+	pr.SetURL(target)
+	pr.SetXForwarded()
 }

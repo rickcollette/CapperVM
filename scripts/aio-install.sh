@@ -15,7 +15,7 @@ PREFIX="${PREFIX:-/usr/local}"
 LIB_ROOT="${LIB_ROOT:-$PREFIX/lib/capper}"
 CONSOLE_LINK="${CONSOLE_DIR:-/opt/capper/console}"
 
-here="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+here="$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "error: run as root (sudo ./install.sh)" >&2

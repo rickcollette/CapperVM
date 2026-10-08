@@ -22,12 +22,14 @@ type NetworkSpec struct {
 }
 
 type InstanceSpec struct {
-	Name    string            `json:"name"`
-	Image   string            `json:"image"`
-	Network string            `json:"network,omitempty"`
-	Labels  map[string]string `json:"labels,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Restart string            `json:"restart,omitempty"` // "always", "on-failure"
+	Name     string            `json:"name"`
+	Image    string            `json:"image"`
+	Network  string            `json:"network,omitempty"` // deprecated
+	SubnetID string            `json:"subnetId,omitempty"`
+	VPCID    string            `json:"vpcId,omitempty"`
+	Labels   map[string]string `json:"labels,omitempty"`
+	Env      map[string]string `json:"env,omitempty"`
+	Restart  string            `json:"restart,omitempty"` // "always", "on-failure"
 }
 
 type LBSpec struct {

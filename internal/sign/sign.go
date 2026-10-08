@@ -12,6 +12,7 @@
 package sign
 
 import (
+	"capper/internal/iox"
 	"archive/tar"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -221,7 +222,7 @@ func repackWithSignature(src string, dst io.Writer, sigData []byte) error {
 		}
 		// Skip any existing signature.json — we append the new one below.
 		if hdr.Name == signatureFile {
-			if _, err := io.Copy(io.Discard, tr); err != nil {
+			if _, err := iox.CopyLimited(io.Discard, tr, iox.DefaultMaxArchiveEntry); err != nil {
 				return err
 			}
 			continue
@@ -229,7 +230,7 @@ func repackWithSignature(src string, dst io.Writer, sigData []byte) error {
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
-		if _, err := io.Copy(tw, tr); err != nil {
+		if _, err := iox.CopyLimited(tw, tr, iox.DefaultMaxArchiveEntry); err != nil {
 			return err
 		}
 	}

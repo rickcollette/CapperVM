@@ -75,7 +75,7 @@ func NewRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().StringVar(&opts.storePath, "store", "", "Capper store path")
-	root.PersistentFlags().StringVar(&opts.runtimeMode, "runtime", "auto", "runtime backend: auto, bwrap, chroot, crun, or runc")
+	root.PersistentFlags().StringVar(&opts.runtimeMode, "runtime", "auto", "runtime backend: auto, bwrap, chroot, crun, runc, lxc, or qemu")
 	root.PersistentFlags().StringVar(&opts.project, "project", "default", "project namespace for resources")
 	root.PersistentFlags().BoolVar(&opts.debug, "debug", false, "enable debug logging")
 	root.PersistentFlags().BoolVar(&opts.json, "json", false, "emit JSON output when applicable")
@@ -272,10 +272,8 @@ func withController(opts *options, fn func(controller.Controller) error) error {
 		return err
 	}
 	defer st.Close()
-	switch opts.runtimeMode {
-	case "auto", "bwrap", "chroot", "crun", "runc":
-	default:
-		return fmt.Errorf("invalid runtime: %s (valid: auto, bwrap, chroot, crun, runc)", opts.runtimeMode)
+	if err := runtime.ValidateMode(opts.runtimeMode); err != nil {
+		return err
 	}
 	ctrl := controller.New(st, opts.debug, opts.runtimeMode)
 	return fn(ctrl)
@@ -331,6 +329,7 @@ func runCmd(opts *options) *cobra.Command {
 	var secretSpecs []string
 	var labelSpecs []string
 	var overrideScan bool
+	var runtimeModeOverride string
 	cmd := &cobra.Command{
 		Use:   "run IMAGE_NAME.cap",
 		Short: "run a .cap image",
@@ -492,6 +491,11 @@ func runCmd(opts *options) *cobra.Command {
 				}
 				secretEnv["CAPPER_METADATA_URL"] = "http://169.254.169.254/capper/v1"
 				secretEnv["CAPPER_METADATA_TOKEN_FILE"] = "/run/capper/metadata-token"
+				if runtimeModeOverride != "" {
+					if err := runtime.ValidateMode(runtimeModeOverride); err != nil {
+						return err
+					}
+				}
 				runOpts := manager.RunOptions{
 					Name:          name,
 					Mounts:        mounts,
@@ -499,6 +503,7 @@ func runCmd(opts *options) *cobra.Command {
 					RestartPolicy: restartPolicy,
 					Env:           secretEnv,
 					Labels:        labels,
+					RuntimeMode:   runtimeModeOverride,
 				}
 				if networkName != "" {
 					n, nerr := ctrl.Store.Networks.Get(networkName, opts.project)
@@ -607,6 +612,7 @@ func runCmd(opts *options) *cobra.Command {
 	cmd.Flags().StringArrayVar(&secretSpecs, "secret", nil, "inject a secret as an env var: SECRET_NAME[=ENV_VAR], repeatable")
 	cmd.Flags().StringArrayVar(&labelSpecs, "label", nil, "attach a label: KEY=VALUE, repeatable")
 	cmd.Flags().BoolVar(&overrideScan, "override-scan", false, "skip scan status check and run even if image has critical findings")
+	cmd.Flags().StringVar(&runtimeModeOverride, "runtime-mode", "", "per-instance runtime override: auto, bwrap, chroot, crun, runc, lxc, or qemu")
 	return cmd
 }
 
@@ -1329,8 +1335,10 @@ Press Ctrl-C to stop.`,
 				}
 				d := control.NewDaemon(ctrl.Store, ctrl.Instances, dopts)
 				d.IMDS = capinit.NewServer(ctrl.Store)
+				control.WireLBCertificates(ctrl.Store, ctrl.CertMgr)
 				ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 				defer cancel()
+				control.StartCertRenewal(ctx, ctrl.CertMgr)
 				if metricsAddr != "" {
 					srv := metrics.NewPrometheusServerWithLB(metricsAddr, ctrl.Store.ListInstances, ctrl.Store.LB.RunningStats)
 					go func() {

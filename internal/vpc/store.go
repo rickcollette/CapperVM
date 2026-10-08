@@ -2,6 +2,7 @@ package vpc
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -100,42 +101,96 @@ func InitSchema(db *sql.DB) error {
 			return fmt.Errorf("vpc.InitSchema: %w", err)
 		}
 	}
-	return nil
+	return MigrateSchema(db)
 }
 
 // ---- VPC CRUD ---------------------------------------------------------------
 
 func (s *Store) InsertVPC(v VPC) error {
+	labels, _ := json.Marshal(v.Labels)
+	if v.PrimaryIPv4CIDR == "" {
+		v.PrimaryIPv4CIDR = v.CIDR
+	}
+	if v.CIDR == "" {
+		v.CIDR = v.PrimaryIPv4CIDR
+	}
+	if v.Status == "" {
+		v.Status = VPCStatusAvailable
+	}
+	if v.UpdatedAt == "" {
+		v.UpdatedAt = v.CreatedAt
+	}
+	dnsSupport, dnsHostnames, flowLogs := 1, 1, 0
+	if !v.DNSSupport {
+		dnsSupport = 0
+	}
+	if !v.DNSHostnames {
+		dnsHostnames = 0
+	}
+	if v.EnableFlowLogs {
+		flowLogs = 1
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO capvpc_vpcs (id, project, name, cidr, dns_domain, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO capvpc_vpcs (
+			id, project, name, cidr, dns_domain, created_at,
+			realm_id, slug, description, status, home_region_id, mobility_policy, labels_json,
+			dns_support, dns_hostnames, default_sg_id, default_acl_id, main_rt_id, enable_flow_logs, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		v.ID, v.Project, v.Name, v.CIDR, v.DNSDomain, v.CreatedAt,
+		v.RealmID, v.Slug, v.Description, v.Status, v.HomeRegionID, v.MobilityPolicy, string(labels),
+		dnsSupport, dnsHostnames, v.DefaultSecurityGroupID, v.DefaultNetworkACLID, v.MainRouteTableID, flowLogs, v.UpdatedAt,
 	)
 	return err
 }
 
 func (s *Store) GetVPC(nameOrID, project string) (VPC, error) {
 	var v VPC
+	var labelsJSON string
+	var dnsSupport, dnsHostnames, flowLogs int
 	var err error
+	q := `SELECT id, project, name, cidr, dns_domain, created_at,
+		COALESCE(realm_id,''), COALESCE(slug,''), COALESCE(description,''), COALESCE(status,'available'),
+		COALESCE(home_region_id,''), COALESCE(mobility_policy,'disabled'), COALESCE(labels_json,'{}'),
+		COALESCE(dns_support,1), COALESCE(dns_hostnames,1),
+		COALESCE(default_sg_id,''), COALESCE(default_acl_id,''), COALESCE(main_rt_id,''),
+		COALESCE(enable_flow_logs,0), COALESCE(updated_at,'')
+		FROM capvpc_vpcs WHERE `
 	if project != "" {
-		err = s.db.QueryRow(
-			`SELECT id, project, name, cidr, dns_domain, created_at FROM capvpc_vpcs WHERE (id=? OR name=?) AND project=?`,
-			nameOrID, nameOrID, project,
-		).Scan(&v.ID, &v.Project, &v.Name, &v.CIDR, &v.DNSDomain, &v.CreatedAt)
+		err = s.db.QueryRow(q+`(id=? OR name=? OR slug=?) AND project=?`, nameOrID, nameOrID, nameOrID, project).Scan(
+			&v.ID, &v.Project, &v.Name, &v.CIDR, &v.DNSDomain, &v.CreatedAt,
+			&v.RealmID, &v.Slug, &v.Description, &v.Status, &v.HomeRegionID, &v.MobilityPolicy, &labelsJSON,
+			&dnsSupport, &dnsHostnames, &v.DefaultSecurityGroupID, &v.DefaultNetworkACLID, &v.MainRouteTableID, &flowLogs, &v.UpdatedAt,
+		)
 	} else {
-		err = s.db.QueryRow(
-			`SELECT id, project, name, cidr, dns_domain, created_at FROM capvpc_vpcs WHERE id=? OR name=?`,
-			nameOrID, nameOrID,
-		).Scan(&v.ID, &v.Project, &v.Name, &v.CIDR, &v.DNSDomain, &v.CreatedAt)
+		err = s.db.QueryRow(q+`id=? OR name=? OR slug=?`, nameOrID, nameOrID, nameOrID).Scan(
+			&v.ID, &v.Project, &v.Name, &v.CIDR, &v.DNSDomain, &v.CreatedAt,
+			&v.RealmID, &v.Slug, &v.Description, &v.Status, &v.HomeRegionID, &v.MobilityPolicy, &labelsJSON,
+			&dnsSupport, &dnsHostnames, &v.DefaultSecurityGroupID, &v.DefaultNetworkACLID, &v.MainRouteTableID, &flowLogs, &v.UpdatedAt,
+		)
 	}
 	if err == sql.ErrNoRows {
 		return v, fmt.Errorf("vpc %q not found", nameOrID)
 	}
-	return v, err
+	if err != nil {
+		return v, err
+	}
+	_ = json.Unmarshal([]byte(labelsJSON), &v.Labels)
+	v.PrimaryIPv4CIDR = v.CIDR
+	v.DNSSupport = dnsSupport == 1
+	v.DNSHostnames = dnsHostnames == 1
+	v.EnableFlowLogs = flowLogs == 1
+	return v, nil
 }
 
 func (s *Store) ListVPCs(project string) ([]VPC, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project, name, cidr, dns_domain, created_at FROM capvpc_vpcs WHERE project=? ORDER BY name`, project,
+		`SELECT id, project, name, cidr, dns_domain, created_at,
+			COALESCE(realm_id,''), COALESCE(slug,''), COALESCE(description,''), COALESCE(status,'available'),
+			COALESCE(home_region_id,''), COALESCE(mobility_policy,'disabled'), COALESCE(labels_json,'{}'),
+			COALESCE(dns_support,1), COALESCE(dns_hostnames,1),
+			COALESCE(default_sg_id,''), COALESCE(default_acl_id,''), COALESCE(main_rt_id,''),
+			COALESCE(enable_flow_logs,0), COALESCE(updated_at,'')
+		FROM capvpc_vpcs WHERE project=? ORDER BY name`, project,
 	)
 	if err != nil {
 		return nil, err
@@ -144,9 +199,20 @@ func (s *Store) ListVPCs(project string) ([]VPC, error) {
 	var out []VPC
 	for rows.Next() {
 		var v VPC
-		if err := rows.Scan(&v.ID, &v.Project, &v.Name, &v.CIDR, &v.DNSDomain, &v.CreatedAt); err != nil {
+		var labelsJSON string
+		var dnsSupport, dnsHostnames, flowLogs int
+		if err := rows.Scan(
+			&v.ID, &v.Project, &v.Name, &v.CIDR, &v.DNSDomain, &v.CreatedAt,
+			&v.RealmID, &v.Slug, &v.Description, &v.Status, &v.HomeRegionID, &v.MobilityPolicy, &labelsJSON,
+			&dnsSupport, &dnsHostnames, &v.DefaultSecurityGroupID, &v.DefaultNetworkACLID, &v.MainRouteTableID, &flowLogs, &v.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal([]byte(labelsJSON), &v.Labels)
+		v.PrimaryIPv4CIDR = v.CIDR
+		v.DNSSupport = dnsSupport == 1
+		v.DNSHostnames = dnsHostnames == 1
+		v.EnableFlowLogs = flowLogs == 1
 		out = append(out, v)
 	}
 	return out, rows.Err()
@@ -163,6 +229,12 @@ func (s *Store) DeleteVPC(nameOrID, project string) error {
 			q    string
 			args []any
 		}{
+			{`DELETE FROM capvpc_eni_security_groups WHERE eni_id IN (SELECT id FROM capvpc_enis WHERE vpc_id=?)`, []any{id}},
+			{`DELETE FROM capvpc_eni_private_ips WHERE eni_id IN (SELECT id FROM capvpc_enis WHERE vpc_id=?)`, []any{id}},
+			{`DELETE FROM capvpc_enis WHERE vpc_id=?`, []any{id}},
+			{`DELETE FROM capvpc_network_acl_entries WHERE network_acl_id IN (SELECT id FROM capvpc_network_acls WHERE vpc_id=?)`, []any{id}},
+			{`DELETE FROM capvpc_subnet_acl_assoc WHERE subnet_id IN (SELECT id FROM capvpc_subnets WHERE vpc_id=?)`, []any{id}},
+			{`DELETE FROM capvpc_network_acls WHERE vpc_id=?`, []any{id}},
 			{`DELETE FROM capvpc_routes WHERE route_table_id IN (SELECT id FROM capvpc_route_tables WHERE vpc_id=?)`, []any{id}},
 			{`DELETE FROM capvpc_subnet_rt_assoc WHERE subnet_id IN (SELECT id FROM capvpc_subnets WHERE vpc_id=?)`, []any{id}},
 			{`DELETE FROM capvpc_sg_rules WHERE security_group_id IN (SELECT id FROM capvpc_security_groups WHERE vpc_id=?)`, []any{id}},
@@ -170,6 +242,9 @@ func (s *Store) DeleteVPC(nameOrID, project string) error {
 			{`DELETE FROM capvpc_security_groups WHERE vpc_id=?`, []any{id}},
 			{`DELETE FROM capvpc_nat_gateways WHERE vpc_id=?`, []any{id}},
 			{`DELETE FROM capvpc_internet_gateways WHERE vpc_id=?`, []any{id}},
+			{`DELETE FROM capvpc_endpoints WHERE vpc_id=?`, []any{id}},
+			{`DELETE FROM capvpc_peerings WHERE requester_vpc_id=? OR accepter_vpc_id=?`, []any{id, id}},
+			{`DELETE FROM capvpc_flow_logs WHERE resource_id=?`, []any{id}},
 			{`DELETE FROM capvpc_subnets WHERE vpc_id=?`, []any{id}},
 		}
 		for _, st := range stmts {
@@ -182,49 +257,41 @@ func (s *Store) DeleteVPC(nameOrID, project string) error {
 	return err
 }
 
-// ---- Subnet CRUD ------------------------------------------------------------
+// ---- Subnet CRUD (extended in store_extended.go) ----------------------------
 
 func (s *Store) InsertSubnet(sub Subnet) error {
+	kind := string(sub.Kind)
+	if kind == "" {
+		kind = string(sub.SubnetType)
+	}
+	if sub.SubnetType == "" {
+		sub.SubnetType = SubnetKind(kind)
+	}
+	autoPublic := 0
+	if sub.AutoAssignPublicIP {
+		autoPublic = 1
+	}
+	if sub.Status == "" {
+		sub.Status = "available"
+	}
+	if sub.UpdatedAt == "" {
+		sub.UpdatedAt = sub.CreatedAt
+	}
+	if sub.ZoneID == "" {
+		sub.ZoneID = sub.Zone
+	}
+	if sub.Zone == "" {
+		sub.Zone = sub.ZoneID
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO capvpc_subnets (id, vpc_id, name, cidr, zone, kind, bridge_name, gateway_ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		sub.ID, sub.VPCID, sub.Name, sub.CIDR, sub.Zone, string(sub.Kind), sub.BridgeName, sub.GatewayIP, sub.CreatedAt,
+		`INSERT INTO capvpc_subnets (
+			id, vpc_id, name, cidr, zone, kind, bridge_name, gateway_ip, created_at,
+			realm_id, region_id, zone_id, slug, route_table_id, network_acl_id, auto_public_ip, status, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sub.ID, sub.VPCID, sub.Name, sub.CIDR, sub.Zone, kind, sub.BridgeName, sub.GatewayIP, sub.CreatedAt,
+		sub.RealmID, sub.RegionID, sub.ZoneID, sub.Slug, sub.RouteTableID, sub.NetworkACLID, autoPublic, sub.Status, sub.UpdatedAt,
 	)
 	return err
-}
-
-func (s *Store) GetSubnet(nameOrID, vpcID string) (Subnet, error) {
-	var sub Subnet
-	var kind string
-	err := s.db.QueryRow(
-		`SELECT id, vpc_id, name, cidr, zone, kind, bridge_name, gateway_ip, created_at FROM capvpc_subnets WHERE (id=? OR name=?) AND vpc_id=?`,
-		nameOrID, nameOrID, vpcID,
-	).Scan(&sub.ID, &sub.VPCID, &sub.Name, &sub.CIDR, &sub.Zone, &kind, &sub.BridgeName, &sub.GatewayIP, &sub.CreatedAt)
-	if err == sql.ErrNoRows {
-		return sub, fmt.Errorf("subnet %q not found in vpc %q", nameOrID, vpcID)
-	}
-	sub.Kind = SubnetKind(kind)
-	return sub, err
-}
-
-func (s *Store) ListSubnets(vpcID string) ([]Subnet, error) {
-	rows, err := s.db.Query(
-		`SELECT id, vpc_id, name, cidr, zone, kind, bridge_name, gateway_ip, created_at FROM capvpc_subnets WHERE vpc_id=? ORDER BY name`, vpcID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Subnet
-	for rows.Next() {
-		var sub Subnet
-		var kind string
-		if err := rows.Scan(&sub.ID, &sub.VPCID, &sub.Name, &sub.CIDR, &sub.Zone, &kind, &sub.BridgeName, &sub.GatewayIP, &sub.CreatedAt); err != nil {
-			return nil, err
-		}
-		sub.Kind = SubnetKind(kind)
-		out = append(out, sub)
-	}
-	return out, rows.Err()
 }
 
 func (s *Store) DeleteSubnet(nameOrID, vpcID string) error {
@@ -235,28 +302,56 @@ func (s *Store) DeleteSubnet(nameOrID, vpcID string) error {
 // ---- RouteTable CRUD --------------------------------------------------------
 
 func (s *Store) InsertRouteTable(rt RouteTable) error {
+	isMain := 0
+	if rt.IsMain {
+		isMain = 1
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO capvpc_route_tables (id, vpc_id, name, created_at) VALUES (?, ?, ?, ?)`,
-		rt.ID, rt.VPCID, rt.Name, rt.CreatedAt,
+		`INSERT INTO capvpc_route_tables (id, vpc_id, name, is_main, created_at) VALUES (?, ?, ?, ?, ?)`,
+		rt.ID, rt.VPCID, rt.Name, isMain, rt.CreatedAt,
 	)
 	return err
 }
 
+func (s *Store) SetRouteTableMain(id string, isMain bool) error {
+	v := 0
+	if isMain {
+		v = 1
+	}
+	_, err := s.db.Exec(`UPDATE capvpc_route_tables SET is_main=? WHERE id=?`, v, id)
+	return err
+}
+
+func (s *Store) GetRouteTableByID(id string) (RouteTable, error) {
+	var rt RouteTable
+	var isMain int
+	err := s.db.QueryRow(
+		`SELECT id, vpc_id, name, COALESCE(is_main,0), created_at FROM capvpc_route_tables WHERE id=?`, id,
+	).Scan(&rt.ID, &rt.VPCID, &rt.Name, &isMain, &rt.CreatedAt)
+	if err == sql.ErrNoRows {
+		return rt, fmt.Errorf("route table %q not found", id)
+	}
+	rt.IsMain = isMain == 1
+	return rt, err
+}
+
 func (s *Store) GetRouteTable(nameOrID, vpcID string) (RouteTable, error) {
 	var rt RouteTable
+	var isMain int
 	err := s.db.QueryRow(
-		`SELECT id, vpc_id, name, created_at FROM capvpc_route_tables WHERE (id=? OR name=?) AND vpc_id=?`,
+		`SELECT id, vpc_id, name, COALESCE(is_main,0), created_at FROM capvpc_route_tables WHERE (id=? OR name=?) AND vpc_id=?`,
 		nameOrID, nameOrID, vpcID,
-	).Scan(&rt.ID, &rt.VPCID, &rt.Name, &rt.CreatedAt)
+	).Scan(&rt.ID, &rt.VPCID, &rt.Name, &isMain, &rt.CreatedAt)
 	if err == sql.ErrNoRows {
 		return rt, fmt.Errorf("route table %q not found", nameOrID)
 	}
+	rt.IsMain = isMain == 1
 	return rt, err
 }
 
 func (s *Store) ListRouteTables(vpcID string) ([]RouteTable, error) {
 	rows, err := s.db.Query(
-		`SELECT id, vpc_id, name, created_at FROM capvpc_route_tables WHERE vpc_id=? ORDER BY name`, vpcID,
+		`SELECT id, vpc_id, name, COALESCE(is_main,0), created_at FROM capvpc_route_tables WHERE vpc_id=? ORDER BY name`, vpcID,
 	)
 	if err != nil {
 		return nil, err
@@ -265,9 +360,11 @@ func (s *Store) ListRouteTables(vpcID string) ([]RouteTable, error) {
 	var out []RouteTable
 	for rows.Next() {
 		var rt RouteTable
-		if err := rows.Scan(&rt.ID, &rt.VPCID, &rt.Name, &rt.CreatedAt); err != nil {
+		var isMain int
+		if err := rows.Scan(&rt.ID, &rt.VPCID, &rt.Name, &isMain, &rt.CreatedAt); err != nil {
 			return nil, err
 		}
+		rt.IsMain = isMain == 1
 		out = append(out, rt)
 	}
 	return out, rows.Err()
@@ -313,11 +410,24 @@ func (s *Store) DeleteRoute(id string) error {
 }
 
 func (s *Store) AssociateSubnetRouteTable(subnetID, routeTableID string) error {
-	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO capvpc_subnet_rt_assoc (subnet_id, route_table_id) VALUES (?, ?)`,
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`DELETE FROM capvpc_subnet_rt_assoc WHERE subnet_id=?`, subnetID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO capvpc_subnet_rt_assoc (subnet_id, route_table_id) VALUES (?, ?)`,
 		subnetID, routeTableID,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE capvpc_subnets SET route_table_id=? WHERE id=?`, routeTableID, subnetID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ---- SecurityGroup CRUD -----------------------------------------------------

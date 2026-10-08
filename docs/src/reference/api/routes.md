@@ -14,7 +14,7 @@ outputs:
 
 > Generated from `internal/api` route registrations by `make docs-api`. Do not edit by hand.
 
-All routes are under `/api/v1` and require [authentication](overview.md) unless listed as public there. Responses use the [standard envelope](overview.md#response-envelope). This deployment registers **474** routes across **67** groups.
+All routes are under `/api/v1` and require [authentication](overview.md) unless listed as public there. Responses use the [standard envelope](overview.md#response-envelope). This deployment registers **542** routes across **84** groups.
 
 ## Groups
 
@@ -35,10 +35,11 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 - [`daemon`](#daemon) — 1 routes
 - [`databases`](#databases) — 4 routes
 - [`db`](#db) — 1 routes
-- [`dns`](#dns) — 7 routes
+- [`dns`](#dns) — 10 routes
 - [`events`](#events) — 1 routes
 - [`factory`](#factory) — 7 routes
 - [`firewalls`](#firewalls) — 8 routes
+- [`flow-logs`](#flow-logs) — 2 routes
 - [`functions`](#functions) — 12 routes
 - [`governance`](#governance) — 3 routes
 - [`gpu`](#gpu) — 5 routes
@@ -49,41 +50,57 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 - [`images`](#images) — 11 routes
 - [`ingress`](#ingress) — 3 routes
 - [`instance-disk-capacity`](#instance-disk-capacity) — 1 routes
-- [`instances`](#instances) — 17 routes
+- [`instance-types`](#instance-types) — 2 routes
+- [`instances`](#instances) — 22 routes
+- [`internet-gateways`](#internet-gateways) — 3 routes
 - [`ip-pools`](#ip-pools) — 4 routes
 - [`ips`](#ips) — 6 routes
 - [`join-tokens`](#join-tokens) — 3 routes
+- [`key-pairs`](#key-pairs) — 4 routes
 - [`kms`](#kms) — 6 routes
-- [`lb`](#lb) — 8 routes
+- [`launch-templates`](#launch-templates) — 5 routes
+- [`lb`](#lb) — 10 routes
 - [`load-balancers`](#load-balancers) — 1 routes
 - [`marketplace`](#marketplace) — 7 routes
 - [`mcp`](#mcp) — 11 routes
 - [`metrics`](#metrics) — 3 routes
 - [`migrations`](#migrations) — 3 routes
-- [`networks`](#networks) — 7 routes
+- [`nat-gateways`](#nat-gateways) — 4 routes
+- [`network-acls`](#network-acls) — 6 routes
+- [`network-interfaces`](#network-interfaces) — 7 routes
+- [`networking`](#networking) — 3 routes
 - [`node-pools`](#node-pools) — 8 routes
 - [`nodes`](#nodes) — 16 routes
 - [`openapi.json`](#openapi.json) — 1 routes
 - [`orgs`](#orgs) — 22 routes
 - [`placement`](#placement) — 4 routes
 - [`posture`](#posture) — 2 routes
+- [`public-ips`](#public-ips) — 5 routes
 - [`queues`](#queues) — 5 routes
 - [`quotas`](#quotas) — 2 routes
+- [`reachability`](#reachability) — 1 routes
 - [`realms`](#realms) — 5 routes
 - [`regions`](#regions) — 9 routes
 - [`resource-events`](#resource-events) — 2 routes
 - [`resources`](#resources) — 7 routes
+- [`route-tables`](#route-tables) — 3 routes
 - [`s3`](#s3) — 6 routes
 - [`scheduler`](#scheduler) — 3 routes
 - [`search`](#search) — 1 routes
 - [`secrets`](#secrets) — 4 routes
+- [`security-group-rules`](#security-group-rules) — 1 routes
+- [`security-groups`](#security-groups) — 5 routes
 - [`service-nodes`](#service-nodes) — 2 routes
 - [`stacks`](#stacks) — 5 routes
 - [`storage`](#storage) — 14 routes
+- [`subnets`](#subnets) — 4 routes
+- [`target-groups`](#target-groups) — 2 routes
 - [`topology`](#topology) — 2 routes
 - [`users`](#users) — 10 routes
 - [`version`](#version) — 1 routes
-- [`vpcs`](#vpcs) — 25 routes
+- [`vpc-endpoints`](#vpc-endpoints) — 2 routes
+- [`vpc-peerings`](#vpc-peerings) — 2 routes
+- [`vpcs`](#vpcs) — 29 routes
 - [`zones`](#zones) — 10 routes
 
 ## accounts
@@ -326,6 +343,9 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `GET` | `/api/v1/dns/zones/{zone}` |
 | `POST` | `/api/v1/dns/zones/{zone}/records` |
 | `DELETE` | `/api/v1/dns/zones/{zone}/records/{id}` |
+| `DELETE` | `/api/v1/dns/zones/{zone}/vpc-associations` |
+| `GET` | `/api/v1/dns/zones/{zone}/vpc-associations` |
+| `POST` | `/api/v1/dns/zones/{zone}/vpc-associations` |
 
 ## events
 
@@ -357,6 +377,13 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `GET` | `/api/v1/firewalls/{name}/rules` |
 | `POST` | `/api/v1/firewalls/{name}/rules` |
 | `DELETE` | `/api/v1/firewalls/{name}/rules/{id}` |
+
+## flow-logs
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/flow-logs` |
+| `POST` | `/api/v1/flow-logs` |
 
 ## functions
 
@@ -473,6 +500,13 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | --- | --- |
 | `GET` | `/api/v1/instance-disk-capacity` |
 
+## instance-types
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/instance-types` |
+| `GET` | `/api/v1/instance-types/{name}` |
+
 ## instances
 
 | Method | Path |
@@ -482,6 +516,8 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `DELETE` | `/api/v1/instances/{id}` |
 | `GET` | `/api/v1/instances/{id}` |
 | `PATCH` | `/api/v1/instances/{id}` |
+| `POST` | `/api/v1/instances/{id}/attach-network-interface` |
+| `POST` | `/api/v1/instances/{id}/detach-network-interface` |
 | `GET` | `/api/v1/instances/{id}/events` |
 | `GET` | `/api/v1/instances/{id}/logs` |
 | `GET` | `/api/v1/instances/{id}/logs/stderr` |
@@ -490,10 +526,21 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `PUT` | `/api/v1/instances/{id}/metadata` |
 | `GET` | `/api/v1/instances/{id}/metadata/{tab}` |
 | `GET` | `/api/v1/instances/{id}/monitoring` |
+| `DELETE` | `/api/v1/instances/{id}/protect-termination` |
+| `POST` | `/api/v1/instances/{id}/protect-termination` |
+| `POST` | `/api/v1/instances/{id}/reboot` |
 | `POST` | `/api/v1/instances/{id}/restart` |
 | `POST` | `/api/v1/instances/{id}/start` |
 | `POST` | `/api/v1/instances/{id}/stop` |
 | `GET` | `/api/v1/instances/{id}/terminal` |
+
+## internet-gateways
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/internet-gateways` |
+| `POST` | `/api/v1/internet-gateways` |
+| `DELETE` | `/api/v1/internet-gateways/{igwId}` |
 
 ## ip-pools
 
@@ -523,6 +570,15 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `POST` | `/api/v1/join-tokens` |
 | `DELETE` | `/api/v1/join-tokens/{id}` |
 
+## key-pairs
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/key-pairs` |
+| `POST` | `/api/v1/key-pairs` |
+| `DELETE` | `/api/v1/key-pairs/{keyName}` |
+| `GET` | `/api/v1/key-pairs/{keyName}` |
+
 ## kms
 
 | Method | Path |
@@ -533,6 +589,16 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `POST` | `/api/v1/kms/keys/{name}/decrypt` |
 | `POST` | `/api/v1/kms/keys/{name}/encrypt` |
 | `POST` | `/api/v1/kms/keys/{name}/rotate` |
+
+## launch-templates
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/launch-templates` |
+| `POST` | `/api/v1/launch-templates` |
+| `GET` | `/api/v1/launch-templates/{templateId}` |
+| `GET` | `/api/v1/launch-templates/{templateId}/versions` |
+| `POST` | `/api/v1/launch-templates/{templateId}/versions` |
 
 ## lb
 
@@ -546,6 +612,8 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `GET` | `/api/v1/lb/{name}` |
 | `POST` | `/api/v1/lb/{name}/backends` |
 | `DELETE` | `/api/v1/lb/{name}/backends/{address}` |
+| `GET` | `/api/v1/lb/{name}/listeners` |
+| `POST` | `/api/v1/lb/{name}/listeners` |
 
 ## load-balancers
 
@@ -597,17 +665,45 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `POST` | `/api/v1/migrations` |
 | `GET` | `/api/v1/migrations/{plan}` |
 
-## networks
+## nat-gateways
 
 | Method | Path |
 | --- | --- |
-| `GET` | `/api/v1/networks` |
-| `POST` | `/api/v1/networks` |
-| `GET` | `/api/v1/networks/{id}/monitoring` |
-| `DELETE` | `/api/v1/networks/{name}` |
-| `GET` | `/api/v1/networks/{name}` |
-| `POST` | `/api/v1/networks/{name}/attach/{instance}` |
-| `POST` | `/api/v1/networks/{name}/detach/{instance}` |
+| `GET` | `/api/v1/nat-gateways` |
+| `POST` | `/api/v1/nat-gateways` |
+| `DELETE` | `/api/v1/nat-gateways/{natId}` |
+| `GET` | `/api/v1/nat-gateways/{natId}` |
+
+## network-acls
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/network-acls` |
+| `POST` | `/api/v1/network-acls` |
+| `DELETE` | `/api/v1/network-acls/{aclId}` |
+| `GET` | `/api/v1/network-acls/{aclId}` |
+| `POST` | `/api/v1/network-acls/{aclId}/entries` |
+| `DELETE` | `/api/v1/network-acls/{aclId}/entries/{ruleNumber}` |
+
+## network-interfaces
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/network-interfaces` |
+| `POST` | `/api/v1/network-interfaces` |
+| `DELETE` | `/api/v1/network-interfaces/{eniId}` |
+| `GET` | `/api/v1/network-interfaces/{eniId}` |
+| `POST` | `/api/v1/network-interfaces/{eniId}/attach` |
+| `POST` | `/api/v1/network-interfaces/{eniId}/detach` |
+| `POST` | `/api/v1/network-interfaces/{eniId}/private-ips` |
+
+## networking
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/networking/dashboard` |
+| `GET` | `/api/v1/networking/drift` |
+| `GET` | `/api/v1/networking/topology` |
 
 ## node-pools
 
@@ -692,6 +788,16 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `GET` | `/api/v1/posture/findings` |
 | `POST` | `/api/v1/posture/scan` |
 
+## public-ips
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/public-ips` |
+| `POST` | `/api/v1/public-ips/allocate` |
+| `DELETE` | `/api/v1/public-ips/{allocationId}` |
+| `POST` | `/api/v1/public-ips/{allocationId}/associate` |
+| `POST` | `/api/v1/public-ips/{associationId}/disassociate` |
+
 ## queues
 
 | Method | Path |
@@ -708,6 +814,12 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | --- | --- |
 | `GET` | `/api/v1/quotas` |
 | `POST` | `/api/v1/quotas` |
+
+## reachability
+
+| Method | Path |
+| --- | --- |
+| `POST` | `/api/v1/reachability/analyze` |
 
 ## realms
 
@@ -752,6 +864,14 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `GET` | `/api/v1/resources/{id}/events` |
 | `GET` | `/api/v1/resources/{id}/metrics` |
 
+## route-tables
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/route-tables/{routeTableId}` |
+| `POST` | `/api/v1/route-tables/{routeTableId}/routes` |
+| `DELETE` | `/api/v1/route-tables/{routeTableId}/routes/{routeId}` |
+
 ## s3
 
 | Method | Path |
@@ -785,6 +905,22 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `POST` | `/api/v1/secrets` |
 | `DELETE` | `/api/v1/secrets/{name}` |
 | `GET` | `/api/v1/secrets/{name}` |
+
+## security-group-rules
+
+| Method | Path |
+| --- | --- |
+| `DELETE` | `/api/v1/security-group-rules/{ruleId}` |
+
+## security-groups
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/security-groups` |
+| `POST` | `/api/v1/security-groups` |
+| `DELETE` | `/api/v1/security-groups/{sgId}` |
+| `GET` | `/api/v1/security-groups/{sgId}` |
+| `POST` | `/api/v1/security-groups/{sgId}/rules` |
 
 ## service-nodes
 
@@ -822,6 +958,22 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `POST` | `/api/v1/storage/volumes/{name}/attach` |
 | `POST` | `/api/v1/storage/volumes/{name}/detach` |
 
+## subnets
+
+| Method | Path |
+| --- | --- |
+| `DELETE` | `/api/v1/subnets/{subnetId}` |
+| `GET` | `/api/v1/subnets/{subnetId}` |
+| `PATCH` | `/api/v1/subnets/{subnetId}` |
+| `POST` | `/api/v1/subnets/{subnetId}/associate-route-table` |
+
+## target-groups
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/target-groups` |
+| `POST` | `/api/v1/target-groups` |
+
 ## topology
 
 | Method | Path |
@@ -850,6 +1002,20 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | --- | --- |
 | `GET` | `/api/v1/version` |
 
+## vpc-endpoints
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/vpc-endpoints` |
+| `POST` | `/api/v1/vpc-endpoints` |
+
+## vpc-peerings
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/v1/vpc-peerings` |
+| `POST` | `/api/v1/vpc-peerings` |
+
 ## vpcs
 
 | Method | Path |
@@ -860,6 +1026,7 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `GET` | `/api/v1/vpcs/{vpc}` |
 | `PATCH` | `/api/v1/vpcs/{vpc}` |
 | `POST` | `/api/v1/vpcs/{vpc}/copy` |
+| `GET` | `/api/v1/vpcs/{vpc}/dependencies` |
 | `GET` | `/api/v1/vpcs/{vpc}/mobility/jobs` |
 | `GET` | `/api/v1/vpcs/{vpc}/mobility/jobs/{job}` |
 | `POST` | `/api/v1/vpcs/{vpc}/mobility/jobs/{job}/cancel` |
@@ -875,10 +1042,13 @@ All routes are under `/api/v1` and require [authentication](overview.md) unless 
 | `GET` | `/api/v1/vpcs/{vpc}/mobility/plans/{plan}/dry-run` |
 | `POST` | `/api/v1/vpcs/{vpc}/mobility/plans/{plan}/execute` |
 | `POST` | `/api/v1/vpcs/{vpc}/move` |
+| `GET` | `/api/v1/vpcs/{vpc}/route-tables` |
+| `POST` | `/api/v1/vpcs/{vpc}/route-tables` |
 | `GET` | `/api/v1/vpcs/{vpc}/routes` |
 | `POST` | `/api/v1/vpcs/{vpc}/routes` |
 | `GET` | `/api/v1/vpcs/{vpc}/subnets` |
 | `POST` | `/api/v1/vpcs/{vpc}/subnets` |
+| `GET` | `/api/v1/vpcs/{vpc}/summary` |
 
 ## zones
 

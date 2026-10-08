@@ -1,9 +1,9 @@
 ---
 title: "Load balancers"
-description: "Distribute traffic across instance backends, with listeners and public IPs."
+description: "ELB-style load balancers with listeners, target groups, and VIP placement."
 owner: "docs"
 status: "stable"
-reviewed: "2026-06-12"
+reviewed: "2026-06-19"
 outputs:
   - markdown
   - web
@@ -12,50 +12,82 @@ outputs:
 
 # Load balancers
 
-`capper lb` creates load balancers that distribute traffic across instance
-backends. A load balancer's listen address can come from an allocated
-[public IP](routable-ips.md).
+Capper load balancers follow an **ELB-style model**: one load balancer has a
+**scheme** (internal or internet-facing), a **VIP**, multiple **listeners**
+(HTTP/HTTPS/TCP ports on the VIP), and **target groups** with registered
+backends.
 
 ## Create and manage
 
+Use the console wizard at **Load Balancers → Create LB** (`/lb/new`) or the API:
+
 ```bash
-capper lb create my-lb \
-  --listen 0.0.0.0:8080 \
-  --mode http \
-  --algo round-robin \
-  --select tier=web \
-  --network app-net
-capper lb backend ...           # add/remove instance backends
-capper lb list
-capper lb inspect my-lb
-capper lb logs my-lb
-capper lb publish my-lb         # publish/expose the listener
-capper lb delete my-lb
+curl -X POST /api/v1/lb -d '{
+  "name": "web-lb",
+  "scheme": "internal",
+  "type": "application",
+  "subnetId": "sub_…",
+  "autoVip": true,
+  "listenerProtocol": "HTTP",
+  "listenerPort": 80,
+  "targetGroupName": "web-tg",
+  "targetGroupPort": 8080,
+  "initialTargetAddr": "10.0.1.5:8080"
+}'
 ```
 
-| Flag (`lb create`) | Purpose |
+| Field | Purpose |
 | --- | --- |
-| `--listen <addr>` | listen address, e.g. `0.0.0.0:8080` |
-| `--mode tcp\|http` | proxy mode (default `tcp`) |
-| `--algo round-robin\|least-connections` | balancing algorithm |
-| `--select KEY=VALUE` | service selector label for backends |
-| `--network <name\|id>` | attach to a virtual network |
-| `--tls-cert <name>` | TLS cert from the [cert store](certificates.md) |
+| `scheme` | `internal` or `internet-facing` |
+| `type` | `application` (HTTP/HTTPS) or `network` (TCP) |
+| `subnetId` | **Required** — VPC subnet for VIP placement |
+| `vip` / `autoVip` | explicit VIP or auto-allocate (subnet IP or routable pool) |
+| `poolId` | routable IP pool for internet-facing LBs |
+| `listenerProtocol` / `listenerPort` | first front-end listener (optional) |
+| `targetGroupName` / `targetGroupPort` | default target group for that listener |
 
-## Backends and health
+Legacy single-listener create (`listenAddr` + `mode`) is still supported for
+automation; existing LBs are migrated to listeners + target groups on upgrade.
 
-Select backends by label (`--select`) or manage them explicitly with
-`capper lb backend`. Unhealthy backends are removed from rotation — integrate with
-[DNS health checks](manage-dns.md) and [observability](observability.md). For HTTPS,
-attach a [certificate](certificates.md) with `--tls-cert`.
+![Load balancers](/assets/images/screenshots/08-load-balancers.png)
 
-## Exposure
+## Listeners and target groups
 
-- Front a load balancer with [DNS](manage-dns.md) names.
-- Bind a [public/elastic IP](routable-ips.md) for external reachability.
-- Terminate TLS with an issued [certificate](certificates.md).
+Each listener binds `vipAddress:port` and forwards to one target group.
+Manage on the LB detail page tabs or via API:
+
+```bash
+# Listeners
+GET/POST /api/v1/lb/{name}/listeners
+PATCH/DELETE /api/v1/lb/{name}/listeners/{id}
+
+# Target groups (LB-scoped)
+GET/POST /api/v1/lb/{name}/target-groups
+POST/DELETE /api/v1/lb/{name}/target-groups/{tgId}/targets
+```
+
+Internal VIP picker: `GET /api/v1/subnets/{id}/available-ips`
+
+## TLS and ACME
+
+- **HTTP** listeners serve ACME `http-01` at `/.well-known/acme-challenge/`.
+- **HTTPS** listeners require a `certificateId` before the proxy starts.
+- Attach per listener: `POST /api/v1/lb/{name}/listeners/{id}/certificates`
+
+Issue certificates under [Certificates](certificates.md), then attach on the
+**TLS** tab of the LB detail page.
+
+## IP placement
+
+| Scheme | VIP source |
+| --- | --- |
+| **internet-facing** | Routable IP from a pool whose `usage` includes `load-balancer` ([Public IPAM](routable-ips.md)) |
+| **internal** | Private IP allocated in the subnet CIDR |
+
+On create, the API reserves/attaches routable IPs or allocates subnet IPs
+automatically when `autoVip` is true.
 
 ## Related
 
 - [Networking model](../concepts/networking-model.md) · [Ingress](ingress.md)
-  · [Public IPAM](routable-ips.md)
+  · [Manage VPCs](manage-networks.md) · [Public IPAM](routable-ips.md)

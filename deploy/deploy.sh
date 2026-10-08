@@ -20,33 +20,50 @@
 #
 # ── Configuration (env overrides) ─────────────────────────────────────────────
 #   DEPLOY_HOST    SSH host                 (default cloud.cappervm.com)
-#   DEPLOY_USER    SSH user                 (default megalith)
-#   SSH_KEY        SSH private key          (default /home/megalith/.ssh/deploy)
+#   DEPLOY_USER    SSH user                 (default $USER)
+#   SSH_KEY        SSH private key          (default $HOME/.ssh/deploy)
 #   DOMAIN         public TLS domain        (default = DEPLOY_HOST)
-#   ACME_EMAIL     Let's Encrypt contact    (default rcollet@gmail.com)
+#   ACME_EMAIL     Let's Encrypt contact    (required — set env or deploy/local.env)
 #   ACME_STAGING   1 = LE staging (testing) (default 0 = production cert)
 #   BACKEND        capper db backend        (default capdb)
-#   VERSION        release version          (default from ./VERSION)
+#   VERSION        release version          (default: auto-bump patch in ./VERSION)
+#   BUMP_VERSION   1 = bump patch before build (default); 0 = use VERSION as-is
 #   SKIP_BUILD     1 = reuse existing tgz   (default 0)
 #   SKIP_TESTS     1 = skip build test gate (passed through to build-aio.sh)
 set -euo pipefail
 
 # ── Locations ─────────────────────────────────────────────────────────────────
-HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-ROOT="$(CDPATH= cd -- "$HERE/.." && pwd)"
+HERE="$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)"
+ROOT="$(CDPATH="" cd -- "$HERE/.." && pwd)"
 cd "$ROOT"
+
+# ── Local overrides (gitignored) ──────────────────────────────────────────────
+LOCAL_ENV_FILE="${LOCAL_ENV_FILE:-$HERE/local.env}"
+if [ -f "$LOCAL_ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  set -a; . "$LOCAL_ENV_FILE"; set +a
+fi
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 DEPLOY_HOST="${DEPLOY_HOST:-cloud.cappervm.com}"
-DEPLOY_USER="${DEPLOY_USER:-megalith}"
-SSH_KEY="${SSH_KEY:-/home/megalith/.ssh/deploy}"
+DEPLOY_USER="${DEPLOY_USER:-${USER:-}}"
+SSH_KEY="${SSH_KEY:-${HOME}/.ssh/deploy}"
 DOMAIN="${DOMAIN:-$DEPLOY_HOST}"
-ACME_EMAIL="${ACME_EMAIL:-rcollet@gmail.com}"
+ACME_EMAIL="${ACME_EMAIL:-}"
 ACME_STAGING="${ACME_STAGING:-0}"
 BACKEND="${BACKEND:-capdb}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
+BUMP_VERSION="${BUMP_VERSION:-1}"
 
-# Google SSO: load OAuth client creds from a gitignored secrets file (or env).
+# ── Version ───────────────────────────────────────────────────────────────────
+# Auto-increment patch on each deploy build unless VERSION is preset or bump disabled.
+if [ -z "${VERSION:-}" ]; then
+  if [ "$SKIP_BUILD" = "1" ] || [ "$BUMP_VERSION" = "0" ]; then
+    if [ -f VERSION ]; then VERSION="$(tr -d ' \n\r' < VERSION)"; else VERSION="0.0.0-$(date +%Y%m%d)"; fi
+  else
+    VERSION="$(scripts/bump-version.sh patch)"
+  fi
+fi
 # When both id+secret are present, oauth2-proxy gates the site to ALLOWED_DOMAINS.
 OAUTH_ENV_FILE="${OAUTH_ENV_FILE:-$HERE/oauth2.env}"
 if [ -f "$OAUTH_ENV_FILE" ]; then
@@ -55,16 +72,12 @@ if [ -f "$OAUTH_ENV_FILE" ]; then
 fi
 OAUTH2_CLIENT_ID="${OAUTH2_CLIENT_ID:-}"
 OAUTH2_CLIENT_SECRET="${OAUTH2_CLIENT_SECRET:-}"
-ALLOWED_DOMAINS="${ALLOWED_DOMAINS:-impenetrix.com,inipi.org}"
+ALLOWED_DOMAINS="${ALLOWED_DOMAINS:-}"
 # Optional: ensure this email is an active admin on deploy (first administrator;
 # no self-registration). Idempotent if already admin.
 BOOTSTRAP_ADMIN="${BOOTSTRAP_ADMIN:-}"
 SSO_ENABLED=0
 [ -n "$OAUTH2_CLIENT_ID" ] && [ -n "$OAUTH2_CLIENT_SECRET" ] && SSO_ENABLED=1
-
-if [ -z "${VERSION:-}" ]; then
-  if [ -f VERSION ]; then VERSION="$(tr -d ' \n' < VERSION)"; else VERSION="0.0.0-$(date +%Y%m%d)"; fi
-fi
 
 PKG="capper-aio-${VERSION}-linux-amd64"
 TGZ="DIST/AIO/${PKG}.tgz"
@@ -77,6 +90,10 @@ else C=''; G=''; R=''; Z=''; fi
 say()  { printf "\n${C}==> %s${Z}\n" "$*"; }
 ok()   { printf "${G}  ✓ %s${Z}\n" "$*"; }
 die()  { printf "${R}  ✗ %s${Z}\n" "$*" >&2; exit 1; }
+
+# Required deploy identity (no personal defaults checked into the repo).
+[ -n "$ACME_EMAIL" ] || die "ACME_EMAIL is required (export ACME_EMAIL=you@example.com)"
+[ -n "$DEPLOY_USER" ] || die "DEPLOY_USER is required (export DEPLOY_USER=…)"
 
 # Connection multiplexing: route every ssh/scp through ONE TCP connection so a
 # fail2ban-style jail sees a single login instead of one per step (which can
@@ -140,6 +157,9 @@ if [ "$SKIP_BUILD" = "1" ]; then
   [ -f "$TGZ" ] || die "no prebuilt tarball at $TGZ"
 else
   say "Building AIO bundle (CapDB + capper + console) via scripts/build-aio.sh"
+  if [ "$BUMP_VERSION" = "1" ]; then
+    ok "VERSION -> $VERSION (patch bump)"
+  fi
   SKIP_TESTS="${SKIP_TESTS:-0}" scripts/build-aio.sh "$VERSION"
 fi
 [ -f "$TGZ" ] || die "expected tarball missing: $TGZ"

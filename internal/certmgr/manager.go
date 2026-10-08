@@ -34,6 +34,11 @@ func (m *CertManager) GetStore() *Store {
 	return m.store
 }
 
+// Config returns the active certificate manager configuration.
+func (m *CertManager) Config() *CertManagerConfig {
+	return m.config
+}
+
 func (m *CertManager) RequestCertificate(ctx context.Context, req CertRequest) (*Certificate, error) {
 	// Check rate limit
 	domainRoot := extractDomainRoot(req.CommonName)
