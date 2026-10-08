@@ -854,6 +854,43 @@ func findExecutable(name string) (string, error) {
 
 // ---- serve command ----------------------------------------------------------
 
+func resolveWebPath(webDir, requestPath string) (string, error) {
+	root, err := filepath.EvalSymlinks(webDir)
+	if err != nil {
+		return "", err
+	}
+	rel := filepath.Clean(filepath.FromSlash(strings.TrimPrefix(requestPath, "/")))
+	if !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("invalid web path")
+	}
+	path, err := filepath.EvalSymlinks(filepath.Join(root, rel))
+	if err != nil {
+		return "", err
+	}
+	insideRoot := func(candidate string) bool {
+		rel, err := filepath.Rel(root, candidate)
+		return err == nil && (rel == "." || filepath.IsLocal(rel))
+	}
+	if !insideRoot(path) {
+		return "", fmt.Errorf("invalid web path")
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if st.IsDir() {
+		path, err = filepath.EvalSymlinks(filepath.Join(path, "index.html"))
+		if err != nil || !insideRoot(path) {
+			return "", fmt.Errorf("web directory has no index")
+		}
+		st, err = os.Stat(path)
+		if err != nil || st.IsDir() {
+			return "", fmt.Errorf("web directory has no index")
+		}
+	}
+	return path, nil
+}
+
 func cmdServe() error {
 	webDir := filepath.Join(distDir, "web")
 	if _, err := os.Stat(webDir); err != nil {
@@ -863,22 +900,10 @@ func cmdServe() error {
 	// Local docs preview only — loopback bind, no directory listings, TLS with ephemeral cert.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		path := filepath.Join(webDir, filepath.FromSlash(strings.TrimPrefix(r.URL.Path, "/")))
-		if strings.Contains(r.URL.Path, "..") {
-			http.NotFound(w, r)
-			return
-		}
-st, err := os.Stat(path)
+		path, err := resolveWebPath(webDir, r.URL.Path)
 		if err != nil {
 			http.NotFound(w, r)
 			return
-		}
-		if st.IsDir() {
-			path = filepath.Join(path, "index.html")
-			if _, err := os.Stat(path); err != nil {
-				http.NotFound(w, r)
-				return
-			}
 		}
 		http.ServeFile(w, r, path)
 	})

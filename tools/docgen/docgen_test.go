@@ -8,6 +8,54 @@ import (
 	"capper/internal/cli"
 )
 
+func TestResolveWebPathServesDirectoryIndexes(t *testing.T) {
+	webDir := t.TempDir()
+	index := filepath.Join(webDir, "index.html")
+	if err := os.WriteFile(index, []byte("root"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	nestedDir := filepath.Join(webDir, "guide")
+	if err := os.Mkdir(nestedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nestedIndex := filepath.Join(nestedDir, "index.html")
+	if err := os.WriteFile(nestedIndex, []byte("guide"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for requestPath, want := range map[string]string{"/": index, "/guide": nestedIndex, "/guide/": nestedIndex} {
+		got, err := resolveWebPath(webDir, requestPath)
+		if err != nil {
+			t.Fatalf("resolveWebPath(%q): %v", requestPath, err)
+		}
+		if got != want {
+			t.Errorf("resolveWebPath(%q) = %q, want %q", requestPath, got, want)
+		}
+	}
+}
+
+func TestResolveWebPathRejectsTraversalAndSymlinksOutsideRoot(t *testing.T) {
+	webDir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.html")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(webDir, "outside.html")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	for _, requestPath := range []string{"/../secret.html", "/outside.html"} {
+		if _, err := resolveWebPath(webDir, requestPath); err == nil {
+			t.Errorf("resolveWebPath(%q) unexpectedly succeeded", requestPath)
+		}
+	}
+	emptyDir := filepath.Join(webDir, "empty")
+	if err := os.Mkdir(emptyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveWebPath(webDir, "/empty"); err == nil {
+		t.Fatal("directory without index should be rejected")
+	}
+}
+
 // chdirRepoRoot points the test at the module root so the relative paths the
 // generators use (internal/api, docs/src) resolve.
 func chdirRepoRoot(t *testing.T) {
