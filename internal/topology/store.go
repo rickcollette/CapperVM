@@ -414,7 +414,7 @@ func (s *Store) ListRealms() ([]Realm, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Realm
+out := []Realm{}
 	for rows.Next() {
 		r, err := scanRealm(rows.Scan)
 		if err != nil {
