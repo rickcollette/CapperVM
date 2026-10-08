@@ -18,11 +18,29 @@ func (s *Store) InsertENI(e ENI) error {
 	if !e.DeleteOnTermination {
 		del = 0
 	}
-	_, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(
 		`INSERT INTO capvpc_enis (id, vpc_id, subnet_id, zone_id, instance_id, attachment_index, mac_address, source_dest_check, delete_on_termination, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, e.VPCID, e.SubnetID, e.ZoneID, e.InstanceID, e.AttachmentIndex, e.MACAddress, sdc, del, e.Status, e.CreatedAt,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	for _, sgID := range e.SecurityGroupIDs {
+		if sgID == "" {
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT OR IGNORE INTO capvpc_eni_security_groups (eni_id, security_group_id) VALUES (?, ?)`,
+			e.ID, sgID,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) GetENI(id string) (ENI, error) {
@@ -34,6 +52,9 @@ func (s *Store) GetENI(id string) (ENI, error) {
 	if err == sql.ErrNoRows {
 		return e, fmt.Errorf("eni %q not found", id)
 	}
+	if err != nil {
+		return e, err
+	}
 	e.SourceDestCheck = sdc == 1
 	e.DeleteOnTermination = del == 1
 	ips, _ := s.ListENIPrivateIPs(e.ID)
@@ -43,7 +64,48 @@ func (s *Store) GetENI(id string) (ENI, error) {
 			e.PrimaryPrivateIP = ip
 		}
 	}
-	return e, err
+	e.SecurityGroupIDs, _ = s.ListENISecurityGroups(e.ID)
+	return e, nil
+}
+
+func (s *Store) ListENISecurityGroups(eniID string) ([]string, error) {
+	rows, err := s.db.Query(`SELECT security_group_id FROM capvpc_eni_security_groups WHERE eni_id=? ORDER BY security_group_id`, eniID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) SetENISecurityGroups(eniID string, sgIDs []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`DELETE FROM capvpc_eni_security_groups WHERE eni_id=?`, eniID); err != nil {
+		return err
+	}
+	for _, sgID := range sgIDs {
+		if sgID == "" {
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO capvpc_eni_security_groups (eni_id, security_group_id) VALUES (?, ?)`,
+			eniID, sgID,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ListENIs(vpcID string) ([]ENI, error) {
@@ -79,12 +141,93 @@ func (s *Store) UpdateENIAttachment(id, instanceID string, index int, status str
 }
 
 func (s *Store) DeleteENI(id string) error {
+	_, _ = s.db.Exec(`DELETE FROM capvpc_eni_security_groups WHERE eni_id=?`, id)
 	_, err := s.db.Exec(`DELETE FROM capvpc_eni_private_ips WHERE eni_id=?`, id)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.Exec(`DELETE FROM capvpc_enis WHERE id=?`, id)
 	return err
+}
+
+// ListENIsBySubnet returns ENIs in a subnet.
+func (s *Store) ListENIsBySubnet(subnetID string) ([]ENI, error) {
+	rows, err := s.db.Query(`SELECT id FROM capvpc_enis WHERE subnet_id=?`, subnetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ENI
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		e, err := s.GetENI(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListENIsByInstance returns ENIs attached to an instance.
+func (s *Store) ListENIsByInstance(instanceID string) ([]ENI, error) {
+	rows, err := s.db.Query(`SELECT id FROM capvpc_enis WHERE instance_id=?`, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ENI
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		e, err := s.GetENI(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListSubnetUsedIPs returns addresses already consumed in a subnet (ENI IPs + LB VIPs).
+func (s *Store) ListSubnetUsedIPs(subnetID string) ([]string, error) {
+	used := map[string]struct{}{}
+	enis, err := s.ListENIsBySubnet(subnetID)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range enis {
+		for _, ip := range e.PrivateIPAddresses {
+			used[ip] = struct{}{}
+		}
+	}
+	rows, err := s.db.Query(
+		`SELECT vip_address FROM lb_load_balancers WHERE (subnet_id=? OR network_id=?) AND vip_address != ''`,
+		subnetID, subnetID,
+	)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var ip string
+			if err := rows.Scan(&ip); err != nil {
+				return nil, err
+			}
+			used[ip] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]string, 0, len(used))
+	for ip := range used {
+		out = append(out, ip)
+	}
+	return out, nil
 }
 
 func (s *Store) InsertENIPrivateIP(eniID, address string, primary bool) error {

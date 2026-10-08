@@ -46,7 +46,7 @@ func (p *HTTPProxy) Start(ctx context.Context) error {
 	}
 
 	rp := &httputil.ReverseProxy{
-		Director: p.director,
+		Rewrite: p.rewrite,
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{Timeout: dialTimeout}).DialContext,
 		},
@@ -98,7 +98,7 @@ func (p *HTTPProxy) Start(ctx context.Context) error {
 		if err == nil {
 			tlsCert, err := tls.X509KeyPair(cert, key)
 			if err == nil {
-				p.srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{tlsCert}}
+				p.srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{tlsCert}}
 				if err := p.srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 					return err
 				}
@@ -136,7 +136,7 @@ func (p *HTTPProxy) Stop() {
 	}
 }
 
-func (p *HTTPProxy) director(req *http.Request) {
+func (p *HTTPProxy) rewrite(pr *httputil.ProxyRequest) {
 	var addrs []string
 	var err error
 	if p.spec.TargetGroupID != "" {
@@ -162,11 +162,6 @@ func (p *HTTPProxy) director(req *http.Request) {
 	if err != nil {
 		return
 	}
-	req.URL.Scheme = target.Scheme
-	req.URL.Host = target.Host
-	if req.Header.Get("X-Forwarded-For") == "" {
-		if host, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
-			req.Header.Set("X-Forwarded-For", host)
-		}
-	}
+	pr.SetURL(target)
+	pr.SetXForwarded()
 }

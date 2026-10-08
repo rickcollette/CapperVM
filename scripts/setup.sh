@@ -31,7 +31,7 @@ header(){ printf "\n${BOLD}%s${RESET}\n" "$*"; }
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-CAPPERWEB_DIR="${CAPPERWEB_DIR:-/home/$(id -un)/CapperWeb}"
+CAPPERWEB_DIR="${CAPPERWEB_DIR:-$REPO_ROOT/../CapperWeb}"
 DIST_BIN="$REPO_ROOT/DIST/lib/capper-bin"
 RUN_DIR="${RUN_DIR:-$REPO_ROOT/capper-run}"
 

@@ -37,6 +37,7 @@ func NewQUICListener(addr string, tlsCfg *tls.Config, srv *csdserver.Server) (*Q
 	ql.tlsCfg.Store(tlsCfg)
 	// Wrap the config so each incoming handshake reads the latest stored config.
 	dynamic := &tls.Config{
+		MinVersion: tls.VersionTLS12,
 		GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
 			return ql.tlsCfg.Load(), nil
 		},

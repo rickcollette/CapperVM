@@ -269,6 +269,7 @@ func TestFullDeploymentWorkflow(t *testing.T) {
 	code, zoneResp := auth(http.MethodPost, "/api/v1/dns/zones", map[string]any{
 		"name":        "e2e.local",
 		"type":        "private",
+		"networkId":   subnetID,
 		"defaultTtl":  300,
 		"description": "E2E test zone",
 	})

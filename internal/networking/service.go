@@ -36,8 +36,20 @@ func (s *Service) ListVPCs(project string) ([]vpc.VPC, error) {
 	return s.vpc.ListVPCs(project)
 }
 
+// VPCPatch carries optional VPC field updates. Bool pointers allow turning flags off.
+type VPCPatch struct {
+	Name           string
+	Description    string
+	MobilityPolicy string
+	Labels         map[string]string
+	DNSDomain      string
+	DNSSupport     *bool
+	DNSHostnames   *bool
+	EnableFlowLogs *bool
+}
+
 // UpdateVPC patches mutable VPC fields.
-func (s *Service) UpdateVPC(project, ref string, patch vpc.VPC) (vpc.VPC, error) {
+func (s *Service) UpdateVPC(project, ref string, patch VPCPatch) (vpc.VPC, error) {
 	cur, err := s.vpc.GetVPC(ref, project)
 	if err != nil {
 		return vpc.VPC{}, err
@@ -57,9 +69,15 @@ func (s *Service) UpdateVPC(project, ref string, patch vpc.VPC) (vpc.VPC, error)
 	if patch.DNSDomain != "" {
 		cur.DNSDomain = patch.DNSDomain
 	}
-	cur.DNSSupport = patch.DNSSupport || cur.DNSSupport
-	cur.DNSHostnames = patch.DNSHostnames || cur.DNSHostnames
-	cur.EnableFlowLogs = patch.EnableFlowLogs || cur.EnableFlowLogs
+	if patch.DNSSupport != nil {
+		cur.DNSSupport = *patch.DNSSupport
+	}
+	if patch.DNSHostnames != nil {
+		cur.DNSHostnames = *patch.DNSHostnames
+	}
+	if patch.EnableFlowLogs != nil {
+		cur.EnableFlowLogs = *patch.EnableFlowLogs
+	}
 	updated, err := s.vpc.UpdateVPC(cur)
 	if err != nil {
 		return vpc.VPC{}, err

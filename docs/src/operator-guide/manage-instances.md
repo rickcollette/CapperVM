@@ -36,7 +36,10 @@ capper health                                           # instance health checks
 
 Capper prefers Bubblewrap (`bwrap`) with unprivileged user namespaces, falling
 back to `chroot`, `crun`, or `runc`. Pick explicitly with the global
-`--runtime` flag. `capinit` is PID 1 inside the capsule.
+`--runtime` flag, or per instance with `capper run --runtime-mode` / API
+`runtimeMode`. LXC and QEMU are also available when host tools are installed —
+see [LXC and QEMU runtimes](runtimes-lxc-qemu.md). `capinit` is PID 1 inside
+process runtimes.
 
 > Capsule isolation is hardening, not a security boundary — do not run untrusted
 > images.
@@ -57,6 +60,7 @@ back to `chroot`, `crun`, or `runc`. Pick explicitly with the global
 | `--secret NAME[=ENV]` | inject a [secret](secrets.md) as an env var (repeatable) |
 | `--label KEY=VALUE` | attach a label (repeatable) |
 | `--restart never\|always\|on-failure` | restart policy |
+| `--runtime-mode <mode>` | per-instance runtime: auto, bwrap, chroot, crun, runc, lxc, qemu |
 | `--rm` | remove the instance when it stops |
 | `--require-signature` / `--trusted-key <path>` | refuse unsigned images |
 | `--instance-type <type>` | enforce an instance-type envelope |

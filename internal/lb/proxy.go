@@ -63,7 +63,7 @@ func (p *Proxy) Start(ctx context.Context) error {
 		if cerr == nil {
 			tlsCert, cerr := tls.X509KeyPair(cert, key)
 			if cerr == nil {
-				cfg := &tls.Config{Certificates: []tls.Certificate{tlsCert}}
+				cfg := &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{tlsCert}}
 				ln, err = tls.Listen("tcp", p.spec.ListenAddr, cfg)
 			} else {
 				err = cerr

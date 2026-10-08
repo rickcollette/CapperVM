@@ -54,6 +54,13 @@ func (s *Server) handleCreateDNSZone(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err)
 		return
 	}
+	// Private zones (the default) must be attached to a VPC subnet; networkId is the subnet ID.
+	if req.Type == "" || req.Type == capperdns.ZoneTypePrivate {
+		if req.NetworkID == "" {
+			writeBadRequest(w, fmt.Errorf("networkId (vpc subnet id) is required for private zones"))
+			return
+		}
+	}
 	if req.NetworkID != "" {
 		if _, err := s.ctrl.Store.VPC.GetSubnetByID(req.NetworkID); err != nil {
 			writeBadRequest(w, fmt.Errorf("networkId must be a vpc subnet id"))

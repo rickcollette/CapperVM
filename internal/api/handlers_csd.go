@@ -12,6 +12,7 @@ import (
 	csdclient "capper/internal/csd/client"
 	csdfuse "capper/internal/csd/fuse"
 	csdserver "capper/internal/csd/server"
+	"capper/internal/storagepolicy"
 	"capper/internal/types"
 )
 
@@ -49,6 +50,14 @@ func (s *Server) handleCreateCSDVolume(w http.ResponseWriter, r *http.Request) {
 		EncKeyID     string `json:"encryptionKeyId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeBadRequest(w, err)
+		return
+	}
+	if _, err := storagepolicy.RequireDefaultPool(s.ctrl.Store.AdminConfig, s.ctrl.Store.HostStorage); err != nil {
+		writeBadRequest(w, err)
+		return
+	}
+	if err := storagepolicy.ValidatePoolCapacity(s.ctrl.Store.AdminConfig, s.ctrl.Store.HostStorage, req.SizeBytes); err != nil {
 		writeBadRequest(w, err)
 		return
 	}

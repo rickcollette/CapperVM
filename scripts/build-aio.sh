@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# Build, test, and (on success) package the Capper All-In-One bundle for
-# the local platform by default. Output:
-# DIST/AIO/capper-aio-<version>-<platform>.tgz
+# Build, test, and (on success) package the Capper All-In-One bundle.
+# Output: DIST/AIO/capper-aio-<version>-<platform>.tgz
 #
 # Usage:
 #   scripts/build-aio.sh [VERSION]
 #
 # Environment overrides:
 #   CAPDB_DIR      CapDB checkout dir (default ./CapDB; cloned via make capdb-fetch)
-#   CAPPERWEB_DIR  CapperWeb checkout for the console (default /home/megalith/CapperWeb)
+#   CAPDB_BUILD    CapDB cmake build dir (default ./build/capdb; matrix uses /tmp)
+#   CAPPERWEB_DIR  CapperWeb checkout for the console (default ../CapperWeb)
 #   SKIP_WEB=1     skip the npm console build (ships no console/)
 #   SKIP_TESTS=1   skip the test gate (build + package only; not recommended)
 #   BUMP_VERSION=1 when no VERSION arg: auto-increment patch in ./VERSION (default 1)
-#   PLATFORM_SUFFIX artifact suffix (default linux-amd64; matrix builds set
+#   PLATFORM_SUFFIX artifact suffix (default linux-amd64; matrix sets
 #                   ubuntu24.04-glibc2.39-x86_64, debian12-..., etc.)
 set -euo pipefail
 
 # ── Locations ─────────────────────────────────────────────────────────────────
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+ROOT="$(CDPATH="" cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
 
 CAPDB_DIR="${CAPDB_DIR:-CapDB}"
-CAPPERWEB_DIR="${CAPPERWEB_DIR:-/home/megalith/CapperVM/CapperWeb}"
+CAPPERWEB_DIR="${CAPPERWEB_DIR:-$ROOT/../CapperWeb}"
 BUILD_CAPDB="${CAPDB_BUILD:-$ROOT/build/capdb}"
 
 VERSION="${1:-}"
@@ -37,7 +37,6 @@ if [ -z "$VERSION" ]; then
 fi
 
 PLATFORM_SUFFIX="${PLATFORM_SUFFIX:-linux-amd64}"
-GO_PACKAGE_PARALLELISM="${GO_PACKAGE_PARALLELISM:-1}"
 PKG="capper-aio-${VERSION}-${PLATFORM_SUFFIX}"
 OUT_DIR="$ROOT/DIST/AIO"
 STAGE="$OUT_DIR/stage/$PKG"
@@ -46,13 +45,13 @@ say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 
 # ── Preflight ─────────────────────────────────────────────────────────────────
 say "Preflight"
-for t in go cmake cc tar git python3; do
+for t in go cmake cc tar git; do
   command -v "$t" >/dev/null 2>&1 || { echo "error: missing tool '$t'" >&2; exit 1; }
 done
 
 # Ensure the CapDB engine is checked out (clone/update from GitHub into ./CapDB).
 CAPDB_DIR="$CAPDB_DIR" make capdb-fetch
-CAPDB_DIR_ABS="$(CDPATH= cd -- "$CAPDB_DIR" && pwd)"
+CAPDB_DIR_ABS="$(CDPATH="" cd -- "$CAPDB_DIR" && pwd)"
 [ -d "$CAPDB_DIR_ABS/capdb/client" ] || { echo "error: CapDB tree not found at $CAPDB_DIR_ABS" >&2; exit 1; }
 
 # cgo paths for the capdb build tag (mirrors the Makefile).
@@ -71,16 +70,10 @@ BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LDFLAGS="-X capper/internal/version.Version=${VERSION} -X capper/internal/version.Commit=${COMMIT} -X capper/internal/version.BuildDate=${BUILD_DATE}"
 
 say "Building CapDB engine (server + client lib)"
-mkdir -p "$CAPDB_DIR_ABS/build"
-cc "$CAPDB_DIR_ABS/tools/mksourceid.c" -o "$CAPDB_DIR_ABS/build/mksourceid"
 make capdb CAPDB_DIR="$CAPDB_DIR" CAPDB_BUILD="$BUILD_CAPDB"
 
 say "Building capper (cgo + capdb backend, version $VERSION)"
-mkdir -p bin
-CGO_ENABLED=1 \
-  CGO_CFLAGS="$CGO_CFLAGS" \
-  CGO_LDFLAGS="$CGO_LDFLAGS" \
-  go build -tags capdb -ldflags "$LDFLAGS" -o bin/capper ./cmd/capper
+make build-capdb CAPPER_VERSION="$VERSION" CAPDB_DIR="$CAPDB_DIR" CAPDB_BUILD="$BUILD_CAPDB"
 
 say "Building capper-agent and capinit (static, pure-Go, version $VERSION)"
 mkdir -p bin
@@ -103,26 +96,20 @@ if [ "${SKIP_TESTS:-0}" = "1" ]; then
   echo "SKIP_TESTS=1 — skipping the test gate"
 else
   say "Tests: pure-Go suite"
-  go build -p "$GO_PACKAGE_PARALLELISM" ./...
-  go vet -p "$GO_PACKAGE_PARALLELISM" ./...
-  go test -p "$GO_PACKAGE_PARALLELISM" ./...
+  go build ./...
+  go vet ./...
+  go test ./...
 
   say "Tests: CapDB driver conformance + store integration"
+  make test-capdb
   CAPDB_SERVER="$BUILD_CAPDB/capdb-server" \
-    CGO_CFLAGS="$CGO_CFLAGS" \
-    CGO_LDFLAGS="$CGO_LDFLAGS" \
-    go test -p "$GO_PACKAGE_PARALLELISM" -tags capdb ./internal/capdbdriver/...
-  CAPDB_SERVER="$BUILD_CAPDB/capdb-server" \
-    CGO_CFLAGS="$CGO_CFLAGS" \
-    CGO_LDFLAGS="$CGO_LDFLAGS" \
-    go test -p "$GO_PACKAGE_PARALLELISM" -tags capdb ./internal/store/ -run SelfHeal -count=1
+    go test -tags capdb ./internal/store/ -run SelfHeal -count=1
 fi
 
 # ── Package ───────────────────────────────────────────────────────────────────
 say "Packaging $PKG"
 rm -rf "$OUT_DIR/stage"
-mkdir -p "$STAGE/bin"
-mkdir -p "$STAGE/images"
+mkdir -p "$STAGE/bin" "$STAGE/images"
 
 install -m 0755 bin/capper            "$STAGE/bin/capper"
 install -m 0755 bin/capper-agent      "$STAGE/bin/capper-agent"
@@ -163,10 +150,8 @@ else
   if command -v docker >/dev/null 2>&1; then
     build_sample_image alpine
     build_sample_image alma
-    build_sample_image ubuntu
-    build_sample_image rockylinux
   else
-    echo "warning: docker not found — skipping sample images" >&2
+    echo "warning: docker not found — skipping alpine.cap and alma.cap sample images" >&2
   fi
 fi
 
@@ -178,7 +163,7 @@ if [ -d "$CAPPERWEB_DIR/.git" ] && [ "${SKIP_WEB:-0}" != "1" ]; then
 fi
 GLIBC_VERSION="$({ getconf GNU_LIBC_VERSION 2>/dev/null || true; } | awk '{print $2}')"
 OPENSSL_VERSION="$(openssl version 2>/dev/null || echo unknown)"
-python3 - "$STAGE/manifest.json" "$VERSION" "$PLATFORM_SUFFIX" "$COMMIT" "$BUILD_DATE" "$CAPDB_COMMIT" "$CAPPERWEB_COMMIT" "$GLIBC_VERSION" "$OPENSSL_VERSION" "${BUILD_IMAGE_DIGEST:-}" <<'PY'
+python3 - "$STAGE/manifest.json" "$VERSION" "$PLATFORM_SUFFIX" "$COMMIT" "$BUILD_DATE" "$CAPDB_COMMIT" "$CAPPERWEB_COMMIT" "$GLIBC_VERSION" "$OPENSSL_VERSION" "${BUILD_IMAGE_DIGEST:-}" <<'MANIFEST_PY'
 import glob, hashlib, json, os, sys
 path, version, platform, commit, build_date, capdb_commit, web_commit, glibc, openssl, image_digest = sys.argv[1:11]
 root = os.path.dirname(path)
@@ -207,7 +192,7 @@ manifest = {
 with open(path, "w") as f:
     json.dump(manifest, f, indent=2, sort_keys=True)
     f.write("\n")
-PY
+MANIFEST_PY
 
 cat > "$STAGE/README.md" <<EOF
 # Capper All-In-One — $VERSION ($PLATFORM_SUFFIX)
@@ -231,9 +216,8 @@ capper aio status
 \`\`\`
 
 ## Runtime requirements
-- Platform: \`$PLATFORM_SUFFIX\`
-- systemd, cgroup v2, Docker Engine, Docker Compose plugin
-- See \`manifest.json\` for the build glibc/OpenSSL ABI.
+- Ubuntu 24.04 (amd64), systemd, cgroup v2
+- OpenSSL 3 (\`libssl.so.3\`): \`sudo apt-get install -y openssl libssl3\`
 EOF
 
 say "Creating tarball"

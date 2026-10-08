@@ -18,7 +18,7 @@
 #   REMOTE_TMP        dir on this host holding <PKG>.tgz + this script
 #   OAUTH2_CLIENT_ID      Google OAuth client id      (empty => SSO disabled)
 #   OAUTH2_CLIENT_SECRET  Google OAuth client secret  (empty => SSO disabled)
-#   ALLOWED_DOMAINS       comma-separated email domains (e.g. inpenetrix.com,inipi.org)
+#   ALLOWED_DOMAINS       comma-separated email domains (e.g. example.com)
 set -euo pipefail
 
 [ "$(id -u)" -eq 0 ] || { echo "remote-setup.sh must run as root" >&2; exit 1; }
@@ -31,7 +31,7 @@ PKG="${PKG:?PKG required}"
 REMOTE_TMP="${REMOTE_TMP:?REMOTE_TMP required}"
 OAUTH2_CLIENT_ID="${OAUTH2_CLIENT_ID:-}"
 OAUTH2_CLIENT_SECRET="${OAUTH2_CLIENT_SECRET:-}"
-ALLOWED_DOMAINS="${ALLOWED_DOMAINS:-inpenetrix.com,inipi.org}"
+ALLOWED_DOMAINS="${ALLOWED_DOMAINS:-}"
 
 CONTROL_ADDR="127.0.0.1:8080"   # control plane HTTP; nginx terminates TLS in front
 CONSOLE_LINK="/opt/capper/console"
@@ -77,7 +77,7 @@ if [ -f "${PKG}.tgz.sha256" ]; then
   sha256sum -c "${PKG}.tgz.sha256" || die "checksum mismatch on ${PKG}.tgz"
   ok "checksum verified"
 fi
-rm -rf "$REMOTE_TMP/$PKG"
+rm -rf -- "${REMOTE_TMP:?}/${PKG:?}"
 tar xzf "${PKG}.tgz" -C "$REMOTE_TMP"
 [ -d "$REMOTE_TMP/$PKG" ] || die "extracted dir not found: $PKG"
 
@@ -243,19 +243,14 @@ else
 fi
 
 # Seed the base images shipped in the bundle (alpine, alma, …). Always
-# (re)upload so image updates ship; upsert by name. New bundles place these
-# under images/; the top-level glob keeps older bundles compatible.
-for cap in "$REMOTE_TMP/$PKG"/images/*.cap "$REMOTE_TMP/$PKG"/*.cap; do
+# (re)upload so image updates ship; upsert by name.
+for cap in "$REMOTE_TMP/$PKG"/*.cap; do
   [ -f "$cap" ] || continue
   nm="$(basename "$cap" .cap)"
-  say "Uploading base image ($nm) from $cap"
-  if curl -fsSL -H "Authorization: Bearer ${CAPPER_BEARER}" \
-    -F file=@"$cap" -F name="$nm" "$base/images/upload" 2>&1; then
-    ok "image '$nm' registered"
-  else
-    # Fallback: directly copy image to images directory (if API not available)
-    sudo cp "$cap" /var/lib/capper/images/ && ok "image '$nm' copied directly" || die "image upload/copy failed: $nm"
-  fi
+  say "Uploading base image ($nm)"
+  curl -fsS -H "Authorization: Bearer ${CAPPER_BEARER}" \
+    -F file=@"$cap" -F name="$nm" "$base/images/upload" >/dev/null \
+    && ok "image '$nm' registered" || die "image upload failed: $nm"
 done
 
 # ──────────────────────────────────────────────────────────────────────────────

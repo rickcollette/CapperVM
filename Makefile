@@ -6,7 +6,7 @@ DIST_APP    := $(DIST_DIR)/$(APP)
 RUN_DIR     := capper-run
 ALPINE_CONFIG := examples/alpine/capper.json
 ALPINE_ROOTFS := examples/alpine/rootfs/bin/sh
-CAPPERWEB_DIR := /home/megalith/CapperWeb
+CAPPERWEB_DIR ?= ../CapperWeb
 
 .PHONY: build test clean distclean dist web bootstrap-alpine \
         capper-run capper-run-stop capper-run-status \
@@ -21,7 +21,6 @@ CAPPERWEB_DIR := /home/megalith/CapperWeb
 CAPDB_REPO  ?= https://github.com/rickcollette/CapDB.git
 CAPDB_DIR   ?= CapDB
 CAPDB_BUILD ?= build/capdb
-CAPDB_JOBS  ?= $(shell nproc)
 
 # ── Version stamping ──────────────────────────────────────────────────────────
 # Read from the VERSION file; git metadata when available. Override CAPPER_VERSION
@@ -92,7 +91,7 @@ capdb:
 	  echo "CapDB source not found at $(CAPDB_DIR); run 'make capdb-fetch' (or set CAPDB_DIR)"; exit 1; }
 	@test -f $(CAPDB_BUILD)/CMakeCache.txt || \
 	  cmake -B $(CAPDB_BUILD) -S $(CAPDB_DIR) -DCAPDB_ENABLE_POOL=ON -DCAPDB_ENABLE_NETWORK=ON
-	cmake --build $(CAPDB_BUILD) -j$(CAPDB_JOBS) --target capdb_client capdb-server capdbtest
+	cmake --build $(CAPDB_BUILD) -j$(shell nproc) --target capdb_client capdb-server capdbtest
 
 capdb-clean:
 	rm -rf $(CAPDB_BUILD)

@@ -1,151 +1,123 @@
-# Capper
+<div align="center">
 
-Capper is a free and open source, self-hosted cloud control plane for running
-private infrastructure on Linux. It brings together a CLI, REST API, Web console,
-node agent, capsule runtime, networking, storage, identity, topology, and
-all-in-one node operations in one project.
+# 🚀 Capper
 
-Current release line: **0.1.38 beta**. Capper is usable for evaluation,
-development, demos, and early operator feedback, but it is still pre-1.0
-software. Do not treat capsule isolation as a strong security boundary for
-hostile workloads yet.
+### A self-hosted, multi-tenant cloud control plane — in a single binary
 
-Repository: <https://github.com/rickcollette/Capper>
+*Compute · Networking · Storage · Identity · Topology · Serverless · Observability*
+*…driven by one control plane, reachable from a CLI, REST API, Go SDK, and Web UI.*
 
-## What is included
+![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=for-the-badge&logo=go&logoColor=white)
+![Web UI](https://img.shields.io/badge/Web%20UI-React%20%2B%20Vite-61DAFB?style=for-the-badge&logo=react&logoColor=black)
+![Database](https://img.shields.io/badge/Store-SQLite%20%7C%20CapDB-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
+![Platform](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+![Status](https://img.shields.io/badge/status-experimental%20v0-EC4899?style=for-the-badge)
 
-The current tree includes:
+</div>
 
-| Area | Current implementation |
-| --- | --- |
-| CLI | `capper` command tree generated from source, including AIO, API, compute, networking, storage, IAM, topology, registry, backups, jobs, events, MCP, AI, and admin commands. |
-| API | REST API under `/api/v1`, served by `capper api start`, with bearer-token auth and optional embedded Web console. |
-| Web console | CapperWeb static assets can be served by the API with `--console <dist>` and are bundled into AIO release archives. |
-| Node services | `capper-agent` for node heartbeat, inventory, metrics, and service supervision; `capinit` for capsule PID 1. |
-| Runtime | Local `.cap` capsule creation and execution with `bwrap`, `chroot`, `crun`, or `runc`. |
-| AIO install | Guided `install.sh` in each release archive installs host dependencies, Docker Engine, Docker Compose plugin, binaries, console assets, systemd drop-ins, and versioned symlinks. |
-| Database | Embedded pure-Go SQLite by default; optional CapDB backend for networked, pooled control-plane storage. |
-| Release packaging | Per-distro x86_64 `.tgz` bundles built inside matching Docker images so glibc/OpenSSL expectations are explicit. |
+---
 
-## Install a beta AIO bundle
+> [!WARNING]
+> **Do not run untrusted `.cap` images with Capper v0.** This is experimental
+> software — treat capsule isolation as best-effort, not a security boundary.
 
-The recommended beta path is to install one of the prebuilt AIO tarballs from
-GitHub Releases. Pick the artifact that matches the target operating system and
-glibc family.
+Capper started as a local `.cap` capsule runner and grew into a full platform:
+compute, networking, storage, identity, topology, certificates, observability,
+serverless, and public IP management — all behind one control plane, exposed
+identically across **four interfaces**.
 
-Latest beta release:
-<https://github.com/rickcollette/Capper/releases/tag/v0.1.38-beta.2>
+## 🏗️ Architecture
 
-| Target | Artifact |
-| --- | --- |
-| Ubuntu 24.04 x86_64 | `capper-aio-0.1.38-ubuntu24.04-glibc2.39-x86_64.tgz` |
-| Debian 12 x86_64 | `capper-aio-0.1.38-debian12-glibc2.36-x86_64.tgz` |
-| RHEL 9 x86_64 | `capper-aio-0.1.38-rhel9-glibc2.34-x86_64.tgz` |
-| Rocky Linux current x86_64 | `capper-aio-0.1.38-rocky10-glibc-detect-x86_64.tgz` |
-| Ubuntu 18.04 x86_64 | `capper-aio-0.1.38-ubuntu18.04-glibc2.27-x86_64.tgz` |
+```mermaid
+flowchart TB
+    CLI["🖥️ CLI<br/><code>capper …</code>"]
+    API["🌐 REST API<br/><code>/api/v1</code>"]
+    SDK["📦 Go SDK<br/><code>cappersdk</code>"]
+    WEB["✨ Web UI<br/>CapperWeb"]
 
-Example for Ubuntu 24.04:
+    subgraph CP["🧠 Control Plane"]
+        direction TB
+        CORE["Controller · Auth · Scheduler"]
+        subgraph SUBS[" "]
+            direction LR
+            C1["⚙️ Compute"]
+            C2["🌐 Networking"]
+            C3["💾 Storage"]
+            C4["🔐 IAM &<br/>Multi-tenancy"]
+            C5["🗺️ Topology"]
+            C6["📊 Observability"]
+            C7["λ Serverless"]
+            C8["🛡️ Security"]
+        end
+    end
 
-```bash
-release=https://github.com/rickcollette/Capper/releases/download/v0.1.38-beta.2
-bundle=capper-aio-0.1.38-ubuntu24.04-glibc2.39-x86_64.tgz
+    subgraph DATA["🗄️ Control-plane store"]
+        direction LR
+        SQLITE[("🪶 SQLite<br/>pure-Go, default")]
+        CAPDB[("🔗 CapDB<br/>networked, opt-in")]
+    end
 
-curl -LO "$release/$bundle"
-curl -LO "$release/$bundle.sha256"
-sha256sum -c "$bundle.sha256"
+    subgraph FLEET["🛰️ Fleet"]
+        direction LR
+        N1["🤖 capper-agent"]
+        N2["🤖 capper-agent"]
+        N3["🤖 capper-agent"]
+    end
 
-tar xzf "$bundle"
-cd "${bundle%.tgz}"
+    CLI & API & SDK & WEB --> CORE
+    CORE --> SUBS
+    CP --> SQLITE
+    CP -. "-tags capdb" .-> CAPDB
+    CORE <== "heartbeat · inventory · metrics" ==> FLEET
 
-sudo ./install.sh --check-only
-sudo ./install.sh --yes
-sudo capper aio doctor
-sudo capper aio init --backend capdb
-sudo capper aio up
-capper aio status
+    classDef iface fill:#6366F1,stroke:#312E81,color:#fff,stroke-width:2px;
+    classDef core  fill:#F59E0B,stroke:#92400E,color:#1F2937,stroke-width:2px;
+    classDef sub   fill:#10B981,stroke:#065F46,color:#04221A,stroke-width:2px;
+    classDef data  fill:#3B82F6,stroke:#1E3A8A,color:#fff,stroke-width:2px;
+    classDef node  fill:#EC4899,stroke:#831843,color:#fff,stroke-width:2px;
+
+    class CLI,API,SDK,WEB iface;
+    class CORE core;
+    class C1,C2,C3,C4,C5,C6,C7,C8 sub;
+    class SQLITE,CAPDB data;
+    class N1,N2,N3 node;
+
+    style CP fill:#FEF3C7,stroke:#F59E0B,stroke-width:3px,color:#1F2937;
+    style DATA fill:#DBEAFE,stroke:#3B82F6,stroke-width:3px,color:#1E3A8A;
+    style FLEET fill:#FCE7F3,stroke:#EC4899,stroke-width:3px,color:#831843;
+    style SUBS fill:#D1FAE5,stroke:#10B981,stroke-width:2px;
 ```
 
-The installer stages releases under `/usr/local/lib/capper/<version>`, points
-`/usr/local/lib/capper/current` at the active version, links binaries into
-`/usr/local/bin`, and links the bundled console into `/opt/capper/console`.
-Re-running the installer stages the new version as an upgrade instead of
-overwriting the old one.
+## 🧩 Subsystems
 
-Useful installer options:
+| Area | What it provides |
+|---|---|
+| ⚙️ **Compute** | `.cap` capsule instances (bwrap/chroot/crun/runc), images, templates, instance types, GPU inventory, compute groups + autoscale |
+| 🌐 **Networking** | virtual networks, VPCs + subnets, firewalls, load balancers, DNS, ingress, **Public IPAM / Elastic IPs** |
+| 💾 **Storage** | block volumes, S3-compatible object store, snapshots, CSD shared/replicated volumes, backups |
+| 🔐 **Multi-tenancy** | organizations → accounts → projects, IAM (users/groups/roles/policies), managed policies, assume-role, quotas, governance, audit |
+| 🗺️ **Topology** | realms → regions → zones → nodes, node pools, service roles, the `capper-agent` daemon, placement scheduler |
+| 🚚 **VPC Mobility** | plan → approve → execute → cutover migration of VPC workloads across realms/regions |
+| 📜 **Certificates** | ACME / Let's Encrypt issuance, renewal scheduler, bindings, internal CA |
+| 📊 **Observability** | unified resource inventory, config drift, metrics, resource events, alerts |
+| λ **Serverless** | Lambda-style **Functions** (triggers, invocations) and managed **MCP servers** with per-tool IAM + approval gates |
+| 🛡️ **Security** | KMS, secrets, image posture scanning, SBOM, marketplace review |
 
-```bash
-sudo ./install.sh --help
-sudo ./install.sh --check-only
-sudo ./install.sh --doctor-only
-sudo ./install.sh --yes --skip-docker
-sudo ./install.sh --yes --backend sqlite
-```
+> [!NOTE]
+> Every subsystem is exposed **consistently across all four interfaces** (CLI,
+> REST API, Go SDK, Web UI) and is covered by tests.
 
-## Build from source
+## 🔌 Interfaces
 
-Prerequisites for the default build:
+- **CLI** — `capper <subsystem> <verb>` (e.g. `capper instances list`, `capper org create`, `capper fn invoke`). Run `capper --help`.
+- **REST API** — `capper api start` serves `/api/v1/…` with bearer-token auth.
+- **Go SDK** — `import cappersdk "capper/sdk/go"` → `c := cappersdk.New(url, token)`; groups include `c.Instances`, `c.IAM`, `c.Functions`, `c.IPAM`, and ~40 more.
+- **Web UI** — **CapperWeb** (Vite + React), served via `capper api start --console <dist>`.
 
-- Linux x86_64
-- Go 1.25 or newer
-- `bwrap`, `crun`, `runc`, or `chroot` support for capsule execution
-- Node.js only if you are building CapperWeb yourself
+## ⚡ Quick start
 
-Build and test the default pure-Go binaries:
-
-```bash
-make build
-make test
-```
-
-This writes `bin/capper` and uses the embedded SQLite backend.
-
-Build with the optional CapDB backend:
-
-```bash
-make capdb-fetch
-make build-capdb
-make test-capdb
-```
-
-`make capdb-fetch` checks out the CapDB engine into this repository's ignored
-`./CapDB` directory. Do not build against a sibling or external CapDB working
-copy unless you intentionally override `CAPDB_DIR`.
-
-## Local development run
-
-For a local control-plane service:
-
-```bash
-make capper-run
-make capper-run-status
-make capper-run-stop
-```
-
-Defaults:
-
-```text
-URL:   http://127.0.0.1:8687
-PID:   capper-run/run/api.pid
-Log:   capper-run/logs/api.log
-Store: capper-run/store
-```
-
-Useful overrides:
-
-```bash
-CAPPER_RUN_API_ADDR=127.0.0.1:8690 make capper-run
-CAPPER_RUN_CONSOLE=/path/to/CapperWeb/dist make capper-run
-```
-
-Start the API directly:
-
-```bash
-capper api start --listen 127.0.0.1:8686 --console /path/to/CapperWeb/dist
-```
-
-## Run a local capsule
-
-The capsule runner is still available for local testing:
+<details open>
+<summary><b>Run a capsule</b></summary>
 
 ```bash
 sh examples/alpine/bootstrap.sh
@@ -154,70 +126,95 @@ go run ./cmd/capper --store /tmp/capper-alpine run alpine.cap
 go run ./cmd/capper --store /tmp/capper-alpine list instances
 ```
 
-Capper selects a runtime automatically, or you can choose one:
+> [!TIP]
+> Capper prefers Bubblewrap (`bwrap`) with unprivileged user namespaces and falls
+> back to chroot (may need `sudo`). Choose with `--runtime bwrap|chroot|crun|runc|lxc|qemu`,
+> and cap resources with `--memory 128M --cpu-time 60 --file-size 16M`.
+
+</details>
+
+<details>
+<summary><b>Run the control plane</b></summary>
 
 ```bash
-go run ./cmd/capper --runtime bwrap --store /tmp/capper-alpine run alpine.cap
-go run ./cmd/capper --runtime crun --store /tmp/capper-alpine run alpine.cap
-sudo go run ./cmd/capper --runtime chroot --store /tmp/capper-alpine run alpine.cap
+make capper-run            # builds a fresh bundle into capper-run/, serves http://127.0.0.1:8687
+make capper-run-status
+make capper-run-stop
+
+# overrides
+CAPPER_RUN_API_ADDR=127.0.0.1:8690 make capper-run
+CAPPER_RUN_CONSOLE=/path/to/CapperWeb/dist make capper-run   # serve the Web UI
+
+# …or start the API directly
+capper api start --listen 127.0.0.1:8686 --console /path/to/CapperWeb/dist
 ```
 
-## Build release artifacts
+</details>
 
-Release outputs are written to `DIST/AIO/` and are intended to be uploaded to
-GitHub Releases, not committed to git.
-
-Build the full matrix:
+<details>
+<summary><b>All-in-one node</b></summary>
 
 ```bash
-rm -rf DIST/AIO/*
-SKIP_TESTS=1 scripts/release-matrix.sh 0.1.38
+capper aio init --backend capdb   # storage layout + local topology + TLS + units
+capper aio up                     # start API, daemon, and local services
+capper aio status
+capper aio upgrade --channel stable   # seamless, auto-rollback upgrades
 ```
 
-The current matrix builds inside Docker for:
+</details>
 
-- Ubuntu 24.04, glibc 2.39
-- Debian 12, glibc 2.36
-- RHEL 9, glibc 2.34
-- Rocky Linux current, detected glibc
-- Ubuntu 18.04, glibc 2.27
-
-Publish a beta prerelease with the GitHub CLI:
+<details>
+<summary><b>Join a worker node</b></summary>
 
 ```bash
-scripts/github-release-beta.sh 0.1.38 2
+capper node join my-node --token <join-token> --address 10.0.0.5 --role compute
+capper node approve my-node        # on the control plane
 ```
 
-This creates or updates `v0.1.38-beta.2` and uploads every `capper-aio-*.tgz`,
-matching `.sha256` file, and `channels.json`.
+The `capper-agent` daemon (`cmd/capper-agent`) sends heartbeats, reports inventory
+and version, pushes host metrics, and supervises services.
 
-## Documentation
+</details>
 
-Source documentation lives under `docs/src/` and generated references are checked
-into the docs tree.
+## 🗄️ Storage backend
 
-High-signal starting points:
+By default Capper persists control-plane state in a single embedded **SQLite**
+database (`modernc.org/sqlite`, WAL + busy timeout) — pure-Go, no external process.
 
-- [Install and build](docs/src/getting-started/installation.md)
-- [Quickstart](docs/src/getting-started/quickstart.md)
-- [Beta releases](docs/src/operator-guide/beta-releases.md)
-- [CapDB backend](docs/src/operator-guide/capdb-backend.md)
-- [CLI reference](docs/src/reference/cli/capper.md)
-- [API route reference](docs/src/reference/api/routes.md)
-- [Repository layout](docs/src/developer-guide/repository-layout.md)
-
-Regenerate documentation references:
+For networked, connection-pooled storage it can instead talk to **CapDB** — a
+SQLite fork with a TLS client/server protocol and a native pool, maintained at
+[rickcollette/CapDB](https://github.com/rickcollette/CapDB) and consumed via
+`CAPDB_DIR`. It keeps the SQLite dialect, so no SQL changes are needed.
 
 ```bash
-make docs-gen
-make docs-check
+make capdb-fetch          # clone/update the CapDB engine
+make capdb                # build the client lib + server
+go build -tags capdb ./cmd/capper
+make test-capdb           # driver conformance suite
 ```
 
-## Contributing
+See [`docs/src/operator-guide/capdb-backend.md`](docs/src/operator-guide/capdb-backend.md).
 
-Capper is an open source project and contributor help is welcome. The best way
-to sign up is to open a GitHub issue describing what you want to work on, where
-you want help getting oriented, or what beta feedback you can provide.
+## 🛠️ Build & test
 
-When changing API CRUD behavior, update CapperWeb in the matching workflow so
-the frontend and backend stay aligned.
+```bash
+make build                # stamped binaries into bin/
+go test ./...
+go vet ./...
+cd ../CapperWeb && npm run build   # Web UI
+```
+
+## 📚 Documentation
+
+Operator and concept docs live under [`docs/`](docs/) (built with the toolchain in
+`docs/config.yml` + `docs/nav.yml`). Start with the
+[Upgrades guide](docs/src/operator-guide/upgrades.md) and the
+[CapDB backend](docs/src/operator-guide/capdb-backend.md).
+
+<div align="center">
+
+---
+
+*Built with Go 🐹 · React ⚛️ · SQLite/CapDB 🗄️ — self-hosted, single-binary, multi-tenant.*
+
+</div>

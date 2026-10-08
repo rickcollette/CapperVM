@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -36,6 +37,7 @@ import (
 	"capper/internal/manager"
 	"capper/internal/metrics"
 	"capper/internal/network"
+	"capper/internal/networking"
 	"capper/internal/org"
 	capreg "capper/internal/registry"
 	"capper/internal/runtime"
@@ -47,6 +49,7 @@ import (
 	"capper/internal/store"
 	"capper/internal/types"
 	"capper/internal/version"
+	"capper/internal/vpc"
 )
 
 type options struct {
@@ -75,7 +78,7 @@ func NewRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().StringVar(&opts.storePath, "store", "", "Capper store path")
-	root.PersistentFlags().StringVar(&opts.runtimeMode, "runtime", "auto", "runtime backend: auto, bwrap, chroot, crun, or runc")
+	root.PersistentFlags().StringVar(&opts.runtimeMode, "runtime", "auto", "runtime backend: auto, bwrap, chroot, crun, runc, lxc, or qemu")
 	root.PersistentFlags().StringVar(&opts.project, "project", "default", "project namespace for resources")
 	root.PersistentFlags().BoolVar(&opts.debug, "debug", false, "enable debug logging")
 	root.PersistentFlags().BoolVar(&opts.json, "json", false, "emit JSON output when applicable")
@@ -272,10 +275,8 @@ func withController(opts *options, fn func(controller.Controller) error) error {
 		return err
 	}
 	defer st.Close()
-	switch opts.runtimeMode {
-	case "auto", "bwrap", "chroot", "crun", "runc":
-	default:
-		return fmt.Errorf("invalid runtime: %s (valid: auto, bwrap, chroot, crun, runc)", opts.runtimeMode)
+	if err := runtime.ValidateMode(opts.runtimeMode); err != nil {
+		return err
 	}
 	ctrl := controller.New(st, opts.debug, opts.runtimeMode)
 	return fn(ctrl)
@@ -326,11 +327,14 @@ func runCmd(opts *options) *cobra.Command {
 	var mountSpecs []string
 	var publishSpecs []string
 	var restart string
-	var networkName string
+	var subnetID string
+	var vpcID string
+	var networkName string // deprecated alias; errors with a migration hint
 	var instanceTypeName string
 	var secretSpecs []string
 	var labelSpecs []string
 	var overrideScan bool
+	var runtimeModeOverride string
 	cmd := &cobra.Command{
 		Use:   "run IMAGE_NAME.cap",
 		Short: "run a .cap image",
@@ -492,6 +496,11 @@ func runCmd(opts *options) *cobra.Command {
 				}
 				secretEnv["CAPPER_METADATA_URL"] = "http://169.254.169.254/capper/v1"
 				secretEnv["CAPPER_METADATA_TOKEN_FILE"] = "/run/capper/metadata-token"
+				if runtimeModeOverride != "" {
+					if err := runtime.ValidateMode(runtimeModeOverride); err != nil {
+						return err
+					}
+				}
 				runOpts := manager.RunOptions{
 					Name:          name,
 					Mounts:        mounts,
@@ -499,31 +508,46 @@ func runCmd(opts *options) *cobra.Command {
 					RestartPolicy: restartPolicy,
 					Env:           secretEnv,
 					Labels:        labels,
+					RuntimeMode:   runtimeModeOverride,
 				}
 				if networkName != "" {
-					n, nerr := ctrl.Store.Networks.Get(networkName, opts.project)
-					if nerr != nil {
-						return fmt.Errorf("network %q not found: %w", networkName, nerr)
-					}
-					runOpts.Network = &manager.NetworkRunOpts{
-						NetworkID: n.ID,
-						Bridge:    n.Bridge,
-						Subnet:    n.Subnet,
-						Gateway:   n.Gateway,
-					}
+					return fmt.Errorf("--network is removed; use --subnet-id with a VPC subnet ID")
 				}
+				if subnetID == "" {
+					return fmt.Errorf("--subnet-id is required (instances must be placed in a VPC subnet)")
+				}
+				launchSub, launchENI, netOpts, nerr := resolveCLISubnetLaunch(ctrl.Store, subnetID, vpcID)
+				if nerr != nil {
+					return nerr
+				}
+				runOpts.Network = netOpts
 				// Account quota enforcement: deny if project/account has hit its instance quota.
 				if qerr := ctrl.Store.Billing.CheckAccountQuota(opts.project, "instance"); qerr != nil {
 					return fmt.Errorf("quota exceeded: %w", qerr)
 				}
 				inst, err := ctrl.Instances.Run(args[0], resources, runOpts)
 				if err != nil {
+					_ = ctrl.Store.VPC.DeleteENI(launchENI.ID)
 					if strings.Contains(err.Error(), "image not found") {
 						ld := loader.Loader{Paths: ctrl.Store.Paths, Debug: opts.debug}
 						_, searched, _ := ld.ResolveImage(args[0])
 						return fmt.Errorf("Failed to run image.\n\nReason:\n  %w\n\nSearched:\n  %s", err, strings.Join(searched, "\n  "))
 					}
 					return fmt.Errorf("Failed to start instance.\n\nReason:\n  %w", err)
+				}
+				if inst.NetworkIP == "" {
+					// Soft dataplane failure: do not leave the ENI in use without an IP.
+					_ = ctrl.Store.VPC.DeleteENI(launchENI.ID)
+				} else if _, aerr := ctrl.Store.VPC.AttachENI(launchENI.ID, inst.ID, 0); aerr != nil {
+					_ = ctrl.Store.VPC.DeleteENI(launchENI.ID)
+					_ = ctrl.Instances.Remove(inst.ID)
+					return fmt.Errorf("eni attach: %w", aerr)
+				} else {
+					inst.VPCID = launchSub.VPCID
+					inst.SubnetID = launchSub.ID
+					inst.PrimaryENIID = launchENI.ID
+					inst.PrivateIPAddress = inst.NetworkIP
+					_ = ctrl.Store.UpdateInstance(*inst)
 				}
 				_ = ctrl.Store.Events.Insert(store.ResourceEvent{
 					ResourceType:  "instance",
@@ -602,11 +626,15 @@ func runCmd(opts *options) *cobra.Command {
 	cmd.Flags().StringArrayVar(&mountSpecs, "mount", nil, "bind mount in SOURCE:TARGET[:ro] format, repeatable")
 	cmd.Flags().StringArrayVar(&publishSpecs, "publish", nil, "publish a container port as HOST:CONTAINER[/proto], repeatable")
 	cmd.Flags().StringVar(&restart, "restart", "", "restart policy: never, always, or on-failure")
-	cmd.Flags().StringVar(&networkName, "network", "", "attach instance to a virtual network (name or ID)")
+	cmd.Flags().StringVar(&subnetID, "subnet-id", "", "VPC subnet ID to place the instance in (required)")
+	cmd.Flags().StringVar(&vpcID, "vpc-id", "", "VPC ID (optional; must match the subnet)")
+	cmd.Flags().StringVar(&networkName, "network", "", "removed: use --subnet-id")
+	_ = cmd.Flags().MarkHidden("network")
 	cmd.Flags().StringVar(&instanceTypeName, "instance-type", "", "enforce an instance type envelope (e.g. cap-g1)")
 	cmd.Flags().StringArrayVar(&secretSpecs, "secret", nil, "inject a secret as an env var: SECRET_NAME[=ENV_VAR], repeatable")
 	cmd.Flags().StringArrayVar(&labelSpecs, "label", nil, "attach a label: KEY=VALUE, repeatable")
 	cmd.Flags().BoolVar(&overrideScan, "override-scan", false, "skip scan status check and run even if image has critical findings")
+	cmd.Flags().StringVar(&runtimeModeOverride, "runtime-mode", "", "per-instance runtime override: auto, bwrap, chroot, crun, runc, lxc, or qemu")
 	return cmd
 }
 
@@ -1465,6 +1493,27 @@ func instanceJSON(instances []types.Instance) []map[string]any {
 	return out
 }
 
+// resolveCLISubnetLaunch resolves a VPC subnet for a CLI launch and reserves an
+// ENI (and thus a private IP) in it. The caller must delete the ENI if the
+// launch fails, and attach it to the instance on success.
+func resolveCLISubnetLaunch(st *store.Store, subnetID, vpcID string) (vpc.Subnet, vpc.ENI, *manager.NetworkRunOpts, error) {
+	sub, err := networking.ResolveSubnetForLaunch(st.VPC, subnetID, vpcID)
+	if err != nil {
+		return vpc.Subnet{}, vpc.ENI{}, nil, fmt.Errorf("subnet: %w", err)
+	}
+	eni, err := st.VPC.CreateENI(sub.VPCID, sub.ID, nil, "")
+	if err != nil {
+		return vpc.Subnet{}, vpc.ENI{}, nil, fmt.Errorf("eni: %w", err)
+	}
+	return sub, eni, &manager.NetworkRunOpts{
+		NetworkID:   sub.ID,
+		Bridge:      sub.BridgeName,
+		Subnet:      sub.CIDR,
+		Gateway:     sub.GatewayIP,
+		PreferredIP: eni.PrimaryPrivateIP,
+	}, nil
+}
+
 // dnsAutoRegister creates an A record for the instance in any DNS zone tied to
 // networkID. Non-fatal: errors are silently discarded so they never break launch.
 func dnsAutoRegister(st *store.Store, networkID, instanceName, ip string) {
@@ -1477,8 +1526,9 @@ func dnsAutoRegister(st *store.Store, networkID, instanceName, ip string) {
 		r, aerr := mgr.CreateRecord(z.Name, networkID, instanceName, "A", []string{ip}, 0)
 		if aerr == nil {
 			// Generate PTR record in the reverse zone for this network's subnet.
-			n, nerr := st.Networks.Get(networkID, "")
-			if nerr == nil {
+			if sub, serr := st.VPC.GetSubnetByID(networkID); serr == nil {
+				dnsAutoRegisterPTR(mgr, networkID, ip, r.Name+"."+z.Name, sub.CIDR)
+			} else if n, nerr := st.Networks.Get(networkID, ""); nerr == nil {
 				dnsAutoRegisterPTR(mgr, networkID, ip, r.Name+"."+z.Name, n.Subnet)
 			}
 		}
@@ -1582,35 +1632,6 @@ func dnsAutoDeregister(st *store.Store, networkID, instanceName string) {
 				_ = mgr.DeleteRecord(z.Name, networkID, r.ID)
 			}
 		}
-	}
-}
-
-// dnsAutoCreateNetworkZone creates a "<name>.cap" zone for the network, registers
-// gateway and dns A records, and adds a DNS allow rule to the firewall if one
-// exists. All errors are swallowed — DNS setup is never fatal to network creation.
-func dnsAutoCreateNetworkZone(st *store.Store, n network.Network) {
-	zoneName := n.Name + ".cap"
-	mgr := capperdns.NewManager(st.DNS)
-	z, err := mgr.CreateZone(zoneName, capperdns.ZoneTypePrivate, n.ID, 30, "auto-created for network "+n.Name)
-	if err != nil {
-		return
-	}
-	_, _ = mgr.CreateRecord(z.Name, n.ID, "gateway", "A", []string{n.Gateway}, 0)
-	_, _ = mgr.CreateRecord(z.Name, n.ID, "dns", "A", []string{n.Gateway}, 0)
-
-	// If a firewall policy exists for this network, add an allow rule for DNS.
-	fw, fwErr := st.Firewalls.Get(n.ID)
-	if fwErr == nil {
-		fwMgr := firewall.NewManager(st.Firewalls)
-		_, _ = fwMgr.AddRule(fw.NetworkID, firewall.RuleSpec{
-			Action:      firewall.ActionAllow,
-			Direction:   firewall.DirectionForward,
-			Protocol:    "udp",
-			Ports:       []int{53},
-			From:        firewall.Endpoint{Type: firewall.EndpointNetwork},
-			To:          firewall.Endpoint{Type: firewall.EndpointGateway},
-			Description: "auto: allow DNS queries to gateway",
-		})
 	}
 }
 
@@ -2754,198 +2775,21 @@ func hostDoctorCmd(opts *options) *cobra.Command {
 // capper network
 // ---------------------------------------------------------------------------
 
+const flatNetworksRemovedMsg = "flat networks have been removed; create a VPC and subnet instead " +
+	"(CapperWeb, the VPC/Subnets API, or `capper vpc`), then pass --subnet-id " +
+	"to `capper run`, `capper db create`, and `capper dns zone create`"
+
 func networkCmd(opts *options) *cobra.Command {
+	help := func(cmd *cobra.Command, args []string) error {
+		return errors.New(flatNetworksRemovedMsg)
+	}
 	cmd := &cobra.Command{
-		Use:   "network",
-		Short: "manage virtual networks",
+		Use:                "network",
+		Short:              "removed: flat virtual networks (use VPC subnets)",
+		Long:               "Flat virtual networks have been removed.\n\n" + flatNetworksRemovedMsg,
+		DisableFlagParsing: true,
+		RunE:               help,
 	}
-	cmd.AddCommand(
-		networkCreateCmd(opts),
-		networkListCmd(opts),
-		networkInspectCmd(opts),
-		networkDeleteCmd(opts),
-		networkConnectCmd(opts),
-		networkDisconnectCmd(opts),
-	)
-	return cmd
-}
-
-func networkCreateCmd(opts *options) *cobra.Command {
-	var subnet string
-	var mode string
-	var enableDNS bool
-	cmd := &cobra.Command{
-		Use:   "create NAME",
-		Short: "create a virtual network",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withIAM(opts, func(iam *iamCtx) error {
-				if err := iam.Authorize("network:create", "project:"+opts.project); err != nil {
-					return err
-				}
-				mgr := network.NewManager(iam.Store.Networks)
-				n, err := mgr.Create(args[0], opts.project, network.CreateOptions{
-					Subnet: subnet,
-					Mode:   mode,
-				})
-				if err != nil {
-					return err
-				}
-				iam.RecordEvent("network", n.ID, "network.created", opts.project, map[string]any{"name": n.Name, "subnet": n.Subnet, "mode": n.Mode})
-				if enableDNS {
-					dnsAutoCreateNetworkZone(iam.Store, n)
-				}
-				if opts.json {
-					return printJSON(n)
-				}
-				fmt.Printf("Created network %q\nID:      %s\nSubnet:  %s\nGateway: %s\nBridge:  %s\nMode:    %s\n",
-					n.Name, n.ID, n.Subnet, n.Gateway, n.Bridge, n.Mode)
-				if enableDNS {
-					fmt.Printf("DNS:     %s.cap zone created\n", n.Name)
-				}
-				return nil
-			})
-		},
-	}
-	cmd.Flags().StringVar(&subnet, "subnet", "10.42.0.0/24", "subnet CIDR for the network")
-	cmd.Flags().StringVar(&mode, "mode", "nat", "network mode: nat, isolated, host-exposed")
-	cmd.Flags().BoolVar(&enableDNS, "dns", false, "auto-create a .cap DNS zone with gateway and dns records")
-	return cmd
-}
-
-func networkListCmd(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "list virtual networks",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withIAM(opts, func(ac *iamCtx) error {
-				if err := ac.Authorize("network:list", "project:"+opts.project); err != nil {
-					return err
-				}
-				mgr := network.NewManager(ac.Store.Networks)
-				nets, err := mgr.List(opts.project)
-				if err != nil {
-					return err
-				}
-				if opts.json {
-					return printJSON(nets)
-				}
-				tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "NAME\tID\tSUBNET\tMODE\tSTATUS\tCREATED")
-				for _, n := range nets {
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-						n.Name, n.ID, n.Subnet, n.Mode, n.Status, shortTime(n.CreatedAt))
-				}
-				return tw.Flush()
-			})
-		},
-	}
-}
-
-func networkInspectCmd(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "inspect NAME",
-		Short: "show network details and active leases",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withIAM(opts, func(ac *iamCtx) error {
-				if err := ac.Authorize("network:inspect", "project:"+opts.project); err != nil {
-					return err
-				}
-				mgr := network.NewManager(ac.Store.Networks)
-				n, leases, err := mgr.Inspect(args[0], opts.project)
-				if err != nil {
-					return err
-				}
-				if opts.json {
-					return printJSON(map[string]any{"network": n, "leases": leases})
-				}
-				fmt.Printf("ID:      %s\nName:    %s\nProject: %s\nSubnet:  %s\nGateway: %s\nBridge:  %s\nMode:    %s\nStatus:  %s\nCreated: %s\n",
-					n.ID, n.Name, n.Project, n.Subnet, n.Gateway, n.Bridge, n.Mode, n.Status, n.CreatedAt)
-				if len(leases) > 0 {
-					fmt.Println("\nLeases:")
-					tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-					fmt.Fprintln(tw, "  INSTANCE\tIP\tMAC\tCREATED")
-					for _, l := range leases {
-						fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", l.InstanceID, l.IP, l.MAC, shortTime(l.CreatedAt))
-					}
-					tw.Flush()
-				}
-				return nil
-			})
-		},
-	}
-}
-
-func networkDeleteCmd(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "delete NAME",
-		Short: "delete a virtual network",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withIAM(opts, func(iam *iamCtx) error {
-				if err := iam.Authorize("network:delete", "project:"+opts.project); err != nil {
-					return err
-				}
-				mgr := network.NewManager(iam.Store.Networks)
-				if err := mgr.Delete(args[0], opts.project); err != nil {
-					return err
-				}
-				iam.RecordEvent("network", args[0], "network.deleted", opts.project, nil)
-				fmt.Printf("Deleted network %q\n", args[0])
-				return nil
-			})
-		},
-	}
-}
-
-func networkConnectCmd(opts *options) *cobra.Command {
-	var netName string
-	var preferredIP string
-	cmd := &cobra.Command{
-		Use:   "connect INSTANCE",
-		Short: "attach an instance to a network",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStore(opts, func(st *store.Store) error {
-				mgr := network.NewManager(st.Networks)
-				lease, err := mgr.Connect(args[0], netName, opts.project, preferredIP)
-				if err != nil {
-					return err
-				}
-				if opts.json {
-					return printJSON(lease)
-				}
-				fmt.Printf("Connected %s to network %q\nIP:  %s\nMAC: %s\n", args[0], netName, lease.IP, lease.MAC)
-				return nil
-			})
-		},
-	}
-	cmd.Flags().StringVar(&netName, "network", "", "network name or ID (required)")
-	cmd.Flags().StringVar(&preferredIP, "ip", "", "preferred IP address")
-	_ = cmd.MarkFlagRequired("network")
-	return cmd
-}
-
-func networkDisconnectCmd(opts *options) *cobra.Command {
-	var netName string
-	cmd := &cobra.Command{
-		Use:   "disconnect INSTANCE",
-		Short: "detach an instance from a network",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStore(opts, func(st *store.Store) error {
-				mgr := network.NewManager(st.Networks)
-				if err := mgr.Disconnect(args[0], netName, opts.project); err != nil {
-					return err
-				}
-				fmt.Printf("Disconnected %s from network %q\n", args[0], netName)
-				return nil
-			})
-		},
-	}
-	cmd.Flags().StringVar(&netName, "network", "", "network name or ID (required)")
-	_ = cmd.MarkFlagRequired("network")
 	return cmd
 }
 
@@ -3426,20 +3270,20 @@ func dnsZoneCmd(opts *options) *cobra.Command {
 func dnsZoneCreateCmd(opts *options) *cobra.Command {
 	var ttl int
 	var desc string
+	var subnetID string
 	cmd := &cobra.Command{
 		Use:   "create NAME",
 		Short: "create a private hosted zone",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withStore(opts, func(st *store.Store) error {
-				// Resolve optional --network to a network ID
-				networkID := ""
-				if opts.project != "default" {
-					n, err := st.Networks.Get(opts.project, "default")
-					if err == nil {
-						networkID = n.ID
-					}
+				if subnetID == "" {
+					return fmt.Errorf("--subnet-id is required for a private hosted zone")
 				}
+				if _, err := st.VPC.GetSubnetByID(subnetID); err != nil {
+					return fmt.Errorf("subnet %q not found: %w", subnetID, err)
+				}
+				networkID := subnetID // DNS networkId is the VPC subnet ID
 				mgr := capperdns.NewManager(st.DNS)
 				z, err := mgr.CreateZone(args[0], capperdns.ZoneTypePrivate, networkID, ttl, desc)
 				if err != nil {
@@ -3455,6 +3299,7 @@ func dnsZoneCreateCmd(opts *options) *cobra.Command {
 	}
 	cmd.Flags().IntVar(&ttl, "ttl", 30, "default TTL for records in this zone")
 	cmd.Flags().StringVar(&desc, "description", "", "zone description")
+	cmd.Flags().StringVar(&subnetID, "subnet-id", "", "VPC subnet ID the private zone is attached to (required)")
 	return cmd
 }
 
@@ -7464,7 +7309,7 @@ func dbCmd(opts *options) *cobra.Command {
 }
 
 func dbCreateCmd(opts *options) *cobra.Command {
-	var engine, network, version string
+	var engine, subnetID, vpcID, legacyNetwork, version string
 	var port int
 	cmd := &cobra.Command{
 		Use:   "create NAME",
@@ -7479,12 +7324,30 @@ func dbCreateCmd(opts *options) *cobra.Command {
 					if engine == "" {
 						return fmt.Errorf("--engine is required (postgres, redis, mariadb, capdb)")
 					}
-					db, err := manager.CreateManagedDatabase(
-						ac.Store, ctrl.Instances, ac.Store.Metadata,
-						args[0], opts.project, engine, version, network, port,
-					)
+					if legacyNetwork != "" {
+						return fmt.Errorf("--network is removed; use --subnet-id with a VPC subnet ID")
+					}
+					if subnetID == "" {
+						return fmt.Errorf("--subnet-id is required")
+					}
+					sub, eni, netOpts, err := resolveCLISubnetLaunch(ac.Store, subnetID, vpcID)
 					if err != nil {
 						return err
+					}
+					db, err := manager.CreateManagedDatabase(
+						ac.Store, ctrl.Instances, ac.Store.Metadata,
+						args[0], opts.project, engine, version, sub.ID, port, netOpts,
+					)
+					if err != nil {
+						_ = ac.Store.VPC.DeleteENI(eni.ID)
+						return err
+					}
+					if db.InstanceID != "" {
+						if _, aerr := ac.Store.VPC.AttachENI(eni.ID, db.InstanceID, 0); aerr != nil {
+							_ = ac.Store.VPC.DeleteENI(eni.ID)
+							_, _ = manager.DeleteManagedDatabase(ac.Store, ctrl.Instances, db.Name, opts.project)
+							return fmt.Errorf("eni attach: %w", aerr)
+						}
 					}
 					ac.RecordEvent("database", db.ID, "db.created", opts.project, map[string]any{"name": db.Name, "engine": db.Engine, "instanceId": db.InstanceID})
 					if opts.json {
@@ -7498,7 +7361,10 @@ func dbCreateCmd(opts *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&engine, "engine", "", "database engine: postgres, redis, mariadb, or capdb (required)")
-	cmd.Flags().StringVar(&network, "network", "", "attach to virtual network (name or ID)")
+	cmd.Flags().StringVar(&subnetID, "subnet-id", "", "VPC subnet ID to place the database in (required)")
+	cmd.Flags().StringVar(&vpcID, "vpc-id", "", "VPC ID (optional; must match the subnet)")
+	cmd.Flags().StringVar(&legacyNetwork, "network", "", "removed: use --subnet-id")
+	_ = cmd.Flags().MarkHidden("network")
 	cmd.Flags().StringVar(&version, "version", "", "engine version (optional)")
 	cmd.Flags().IntVar(&port, "port", 0, "database port (optional)")
 	return cmd

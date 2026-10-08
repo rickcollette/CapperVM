@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"capper/internal/compute"
 	"capper/internal/control"
+	"capper/internal/compute"
 	"capper/internal/controller"
 	csdbackend "capper/internal/csd/backend"
 	csdserver "capper/internal/csd/server"
@@ -833,38 +833,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/csd/volumes/{vol}/replicas", s.handleListCSDReplicas)
 	s.mux.HandleFunc("POST /api/v1/csd/volumes/{vol}/repair", s.handleRepairCSDVolume)
 
-	// Deletion & confirmation flow routes
-	s.mux.HandleFunc("POST /api/v1/{resourceType}/{resourceId}/delete-preflight",
-		s.handleDeleteResourcePreflight)
-	s.mux.HandleFunc("POST /api/v1/{resourceType}/{resourceId}/delete-confirm",
-		s.handleDeleteResourceConfirm)
-	s.mux.HandleFunc("GET /api/v1/deletion-jobs/{jobId}", s.handleGetDeletionJob)
-
-	// CapStart recipe and provisioning
-	s.mux.HandleFunc("GET /api/v1/capstart/recipes", s.handleListRecipes)
-	s.mux.HandleFunc("POST /api/v1/capstart/recipes", s.handleCreateRecipe)
-	s.mux.HandleFunc("GET /api/v1/capstart/recipes/{id}", s.handleGetRecipe)
-	s.mux.HandleFunc("PUT /api/v1/capstart/recipes/{id}", s.handleUpdateRecipe)
-	s.mux.HandleFunc("DELETE /api/v1/capstart/recipes/{id}", s.handleDeleteRecipe)
-	s.mux.HandleFunc("POST /api/v1/capstart/recipes/{id}/validate", s.handleValidateRecipe)
-	s.mux.HandleFunc("POST /api/v1/capstart/recipes/{id}/create-vm", s.handleCreateVMFromRecipe)
-	s.mux.HandleFunc("GET /api/v1/capstart/recipes/builtin", s.handleListBuiltinRecipes)
-
-	// CapStart ISO management
-	s.mux.HandleFunc("GET /api/v1/capstart/isos", s.handleListISOs)
-	s.mux.HandleFunc("POST /api/v1/capstart/isos", s.handleUploadISO)
-	s.mux.HandleFunc("GET /api/v1/capstart/isos/{id}", s.handleGetISO)
-	s.mux.HandleFunc("DELETE /api/v1/capstart/isos/{id}", s.handleDeleteISO)
-	s.mux.HandleFunc("POST /api/v1/capstart/isos/{id}/verify", s.handleVerifyISO)
-
-	// CapStart OS installation tracking
-	s.mux.HandleFunc("POST /api/v1/capstart/install", s.handleStartInstallation)
-	s.mux.HandleFunc("GET /api/v1/capstart/install/{jobId}", s.handleGetInstallationStatus)
-	s.mux.HandleFunc("POST /api/v1/capstart/install/{jobId}/cancel", s.handleCancelInstallation)
-	s.mux.HandleFunc("GET /api/v1/capstart/install/{jobId}/logs", s.handleGetInstallationLogs)
-	s.mux.HandleFunc("GET /api/v1/capstart/executions/{executionId}", s.handleGetRecipeExecution)
-	s.mux.HandleFunc("GET /api/v1/capstart/executions/{executionId}/logs", s.handleGetRecipeExecutionLogs)
-
 	// Certificate Manager routes
 	s.certRoutes()
 
@@ -900,16 +868,43 @@ func (s *Server) staticHandler() http.Handler {
 			serveIndex(w, r)
 			return
 		}
-		full := filepath.Join(root, filepath.Clean(path))
-		if !strings.HasPrefix(full, filepath.Clean(root)) {
+		// Reject traversal without treating filepath.Clean as a sanitizer.
+		if strings.Contains(path, "..") {
 			http.NotFound(w, r)
 			return
 		}
-		if _, err := os.Stat(full); os.IsNotExist(err) {
+		rel := strings.TrimPrefix(path, "/")
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		absFull, err := filepath.Abs(full)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		sep := string(os.PathSeparator)
+		if absFull != absRoot && !strings.HasPrefix(absFull, absRoot+sep) {
+			http.NotFound(w, r)
+			return
+		}
+		st, err := os.Stat(absFull)
+		if os.IsNotExist(err) {
 			serveIndex(w, r)
 			return
 		}
-		http.FileServer(http.Dir(root)).ServeHTTP(w, r)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if st.IsDir() {
+			// SPA fallback — never expose directory listings.
+			serveIndex(w, r)
+			return
+		}
+		http.ServeFile(w, r, absFull)
 	})
 }
 

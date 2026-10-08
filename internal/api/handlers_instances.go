@@ -15,6 +15,7 @@ import (
 	"capper/internal/adminconfig"
 	"capper/internal/cgroup"
 	"capper/internal/hoststorage"
+	"capper/internal/ipam"
 	"capper/internal/manager"
 	"capper/internal/metadata"
 	"capper/internal/networking"
@@ -24,6 +25,7 @@ import (
 	"capper/internal/systemlabels"
 	"capper/internal/topology"
 	"capper/internal/types"
+	"capper/internal/vpc"
 )
 
 type createInstanceRequest struct {
@@ -37,6 +39,7 @@ type createInstanceRequest struct {
 	KeyName         string            `json:"keyName,omitempty"`
 	PrivateIPAddress string           `json:"privateIpAddress,omitempty"`
 	PublicIPBehavior string          `json:"publicIpBehavior,omitempty"` // none, auto, existing-allocation, new-allocation
+	AllocationID     string          `json:"allocationId,omitempty"`
 	TerminationProtection *bool       `json:"terminationProtection,omitempty"`
 	ShutdownBehavior string           `json:"shutdownBehavior,omitempty"`
 	Tags            map[string]string `json:"tags,omitempty"`
@@ -53,6 +56,7 @@ type createInstanceRequest struct {
 	DiskBytes             int64  `json:"diskBytes,omitempty"`
 	LaunchTemplateID      string `json:"launchTemplateId,omitempty"`
 	LaunchTemplateVersion int    `json:"launchTemplateVersion,omitempty"`
+	RuntimeMode           string `json:"runtimeMode,omitempty"` // auto|bwrap|chroot|crun|runc|lxc|qemu
 }
 
 type placementRequest struct {
@@ -72,17 +76,6 @@ type volumeAttach struct {
 	Type       string `json:"type,omitempty"`       // "csd" for shared volumes; empty = classic storage
 	AccessMode string `json:"accessMode,omitempty"` // "rw" (default) or "ro"
 	Required   bool   `json:"required,omitempty"`   // fail instance creation if mount fails
-}
-
-// resourceLimitsRequest uses pointers to distinguish between "not set" (nil) and
-// "set to 0" (zero value), allowing clients to reset limits by passing 0 explicitly.
-type resourceLimitsRequest struct {
-	MemoryBytes   *int64 `json:"memoryBytes,omitempty"`
-	DiskBytes     *int64 `json:"diskBytes,omitempty"`
-	CPUCount      *int64 `json:"cpuCount,omitempty"`
-	CPUTimeSecs   *int64 `json:"cpuTimeSecs,omitempty"`
-	MaxProcesses  *int64 `json:"maxProcesses,omitempty"`
-	FileSizeBytes *int64 `json:"fileSizeBytes,omitempty"`
 }
 
 func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +129,7 @@ func (s *Server) handlePatchInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Resources     *resourceLimitsRequest `json:"resources"`
+		Resources     *types.ResourceLimits `json:"resources"`
 		RestartPolicy *string               `json:"restartPolicy"`
 		Labels        map[string]string     `json:"labels"`
 	}
@@ -145,25 +138,23 @@ func (s *Server) handlePatchInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Resources != nil {
-		// Use pointers to distinguish between "not set" (nil) and "set to 0".
-		// This allows clients to reset limits by passing 0 explicitly.
-		if req.Resources.MemoryBytes != nil && *req.Resources.MemoryBytes > 0 {
-			inst.Resources.MemoryBytes = *req.Resources.MemoryBytes
+		if req.Resources.MemoryBytes > 0 {
+			inst.Resources.MemoryBytes = req.Resources.MemoryBytes
 		}
-		if req.Resources.DiskBytes != nil {
-			inst.Resources.DiskBytes = *req.Resources.DiskBytes
+		if req.Resources.DiskBytes > 0 {
+			inst.Resources.DiskBytes = req.Resources.DiskBytes
 		}
-		if req.Resources.CPUCount != nil && *req.Resources.CPUCount > 0 {
-			inst.Resources.CPUCount = *req.Resources.CPUCount
+		if req.Resources.CPUCount > 0 {
+			inst.Resources.CPUCount = req.Resources.CPUCount
 		}
-		if req.Resources.CPUTimeSecs != nil && *req.Resources.CPUTimeSecs > 0 {
-			inst.Resources.CPUTimeSecs = *req.Resources.CPUTimeSecs
+		if req.Resources.CPUTimeSecs > 0 {
+			inst.Resources.CPUTimeSecs = req.Resources.CPUTimeSecs
 		}
-		if req.Resources.MaxProcesses != nil && *req.Resources.MaxProcesses > 0 {
-			inst.Resources.MaxProcesses = *req.Resources.MaxProcesses
+		if req.Resources.MaxProcesses > 0 {
+			inst.Resources.MaxProcesses = req.Resources.MaxProcesses
 		}
-		if req.Resources.FileSizeBytes != nil && *req.Resources.FileSizeBytes > 0 {
-			inst.Resources.FileSizeBytes = *req.Resources.FileSizeBytes
+		if req.Resources.FileSizeBytes > 0 {
+			inst.Resources.FileSizeBytes = req.Resources.FileSizeBytes
 		}
 	}
 	if req.RestartPolicy != nil {
@@ -179,10 +170,7 @@ func (s *Server) handlePatchInstance(w http.ResponseWriter, r *http.Request) {
 	// Live-apply memory/pids to a running instance via its cgroup; cpu-time and
 	// file-size rlimits require a restart.
 	liveApplied := false
-	needsRestart := req.Resources != nil && (
-		(req.Resources.CPUTimeSecs != nil && *req.Resources.CPUTimeSecs > 0) ||
-		(req.Resources.FileSizeBytes != nil && *req.Resources.FileSizeBytes > 0) ||
-		(req.Resources.DiskBytes != nil && *req.Resources.DiskBytes > 0))
+	needsRestart := req.Resources != nil && (req.Resources.CPUTimeSecs > 0 || req.Resources.FileSizeBytes > 0 || req.Resources.DiskBytes > 0)
 	if inst.Status == types.StatusRunning {
 		if cgm := cgroup.Open(inst.ID); cgm != nil {
 			_ = cgm.Apply(inst.Resources)
@@ -268,7 +256,7 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Env["CAPPER_METADATA_URL"] = "http://169.254.169.254/capper/v1"
 	req.Env["CAPPER_METADATA_TOKEN_FILE"] = "/run/capper/metadata-token"
-	runOpts := manager.RunOptions{Name: req.Name, Labels: req.Labels, Env: req.Env}
+	runOpts := manager.RunOptions{Name: req.Name, Labels: req.Labels, Env: req.Env, RuntimeMode: req.RuntimeMode}
 	var primaryENI string
 	sub, serr := networking.ResolveSubnetForLaunch(s.ctrl.Store.VPC, req.SubnetID, req.VPCID)
 	if serr != nil {
@@ -307,6 +295,9 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 
 	inst, err := s.ctrl.Instances.Run(req.Image, resources, runOpts)
 	if err != nil {
+		if primaryENI != "" {
+			_ = s.ctrl.Store.VPC.DeleteENI(primaryENI)
+		}
 		writeBadRequest(w, err)
 		return
 	}
@@ -326,11 +317,35 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 		inst.PrivateIPAddress = inst.NetworkIP
 		inst.SecurityGroupIDs = req.SecurityGroupIDs
 		if primaryENI != "" {
-			_, _ = s.ctrl.Store.VPC.AttachENI(primaryENI, inst.ID, 0)
+			if inst.NetworkIP == "" {
+				// Soft dataplane failure (e.g. missing CAP_NET): reclaim ENI so it is
+				// not left in-use without a real netns/IP, but keep the instance.
+				_ = s.ctrl.Store.VPC.DeleteENI(primaryENI)
+				primaryENI = ""
+				inst.PrimaryENIID = ""
+				inst.PrivateIPAddress = ""
+			} else if _, aerr := s.ctrl.Store.VPC.AttachENI(primaryENI, inst.ID, 0); aerr != nil {
+				_ = s.ctrl.Store.VPC.DeleteENI(primaryENI)
+				_ = s.ctrl.Instances.Remove(inst.ID)
+				writeBadRequest(w, aerr)
+				return
+			}
 		}
 	}
 	if req.KeyName != "" {
+		if _, kerr := s.ctrl.Store.VPC.GetKeyPair(s.project, req.KeyName); kerr != nil {
+			if primaryENI != "" {
+				_ = s.ctrl.Store.VPC.DeleteENI(primaryENI)
+			}
+			_ = s.ctrl.Instances.Remove(inst.ID)
+			writeBadRequest(w, fmt.Errorf("key pair %q not found", req.KeyName))
+			return
+		}
 		inst.KeyName = req.KeyName
+	}
+	if err := s.applyPublicIPBehavior(req, inst, primaryENI); err != nil {
+		writeBadRequest(w, err)
+		return
 	}
 	if req.TerminationProtection != nil {
 		inst.TerminationProtection = *req.TerminationProtection
@@ -352,6 +367,16 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 			gateway = runOpts.Network.Gateway
 		}
 		userData := req.CapInitContent
+		if req.KeyName != "" {
+			if kp, kerr := s.ctrl.Store.VPC.GetKeyPair(s.project, req.KeyName); kerr == nil && kp.PublicKey != "" {
+				keyBlock := "#capper-ssh-key\n" + kp.PublicKey + "\n"
+				if userData != "" {
+					userData = userData + "\n" + keyBlock
+				} else {
+					userData = keyBlock
+				}
+			}
+		}
 		_, _ = s.ctrl.Store.Metadata.CreateRecord(metadata.InstanceMetadata{
 			InstanceID: inst.ID,
 			Hostname:   inst.Name,
@@ -393,10 +418,8 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, err)
 		return
 	}
-	// Check termination protection. Note: this is a racy check; the protection can
-	// be disabled between here and the Remove() call below. The Remove() method
-	// re-checks protection to catch this TOCTOU case.
-	if inst, err := s.ctrl.Store.ResolveInstance(id); err == nil && inst.TerminationProtection {
+	inst, ierr := s.ctrl.Store.ResolveInstance(id)
+	if ierr == nil && inst.TerminationProtection {
 		writeError(w, http.StatusConflict, "instance has termination protection enabled")
 		return
 	}
@@ -407,6 +430,7 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err)
 		return
 	}
+	s.reclaimInstanceENIs(id, inst, ierr == nil)
 	_ = s.ctrl.Store.Billing.ReleaseUsage(s.project, "instance", id)
 	s.recordEvent(r, "instance", id, "instance.deleted", nil)
 	w.WriteHeader(http.StatusNoContent)
@@ -754,4 +778,99 @@ func (s *Server) resolveInstanceTypeResources(r *http.Request, image, typeName s
 		overrides.CPUSet = true
 	}
 	return overrides, nil
+}
+
+func (s *Server) applyPublicIPBehavior(req createInstanceRequest, inst *types.Instance, primaryENI string) error {
+	behavior := req.PublicIPBehavior
+	if behavior == "" || behavior == "none" {
+		return nil
+	}
+	mgr := s.ipamManager()
+	switch behavior {
+	case "auto", "new-allocation":
+		poolID, purpose, err := s.pickPublicIPPool()
+		if err != nil {
+			return err
+		}
+		ip, err := mgr.Reserve(ipam.ReserveOptions{
+			PoolID: poolID, Project: s.project, Name: inst.Name + "-eip", Purpose: purpose,
+		})
+		if err != nil {
+			return fmt.Errorf("publicIpBehavior auto: %w", err)
+		}
+		if _, err := mgr.Attach(ip.ID, ipam.IPBinding{
+			TargetType: "instance", TargetID: inst.ID, BindingMode: ipam.ModeFloating,
+		}); err != nil {
+			_ = mgr.Release(ip.ID)
+			return fmt.Errorf("publicIpBehavior auto attach: %w", err)
+		}
+		inst.PublicIPAddress = ip.Address
+		return nil
+	case "existing-allocation":
+		if req.AllocationID == "" {
+			return fmt.Errorf("allocationId is required when publicIpBehavior is existing-allocation")
+		}
+		ip, err := s.ipamStore().GetIP(req.AllocationID)
+		if err != nil {
+			return fmt.Errorf("allocation %q not found", req.AllocationID)
+		}
+		if _, err := mgr.Attach(ip.ID, ipam.IPBinding{
+			TargetType: "instance", TargetID: inst.ID, BindingMode: ipam.ModeFloating,
+		}); err != nil {
+			return fmt.Errorf("publicIpBehavior existing-allocation: %w", err)
+		}
+		inst.PublicIPAddress = ip.Address
+		return nil
+	default:
+		return fmt.Errorf("unsupported publicIpBehavior %q (use none, auto, or existing-allocation)", behavior)
+	}
+}
+
+func (s *Server) pickPublicIPPool() (poolID, purpose string, err error) {
+	pools, err := s.ipamStore().ListPools()
+	if err != nil {
+		return "", "", err
+	}
+	preferred := []string{ipam.UsageFloating, ipam.UsagePassthrough, ipam.UsageReserved}
+	for _, purpose := range preferred {
+		for _, p := range pools {
+			if p.Status != ipam.PoolActive || !p.AllowAutoAllocate {
+				continue
+			}
+			for _, u := range p.Usage {
+				if u == purpose {
+					return p.ID, purpose, nil
+				}
+			}
+		}
+	}
+	return "", "", fmt.Errorf("no active auto-allocate public IP pool available for floating/passthrough use")
+}
+
+func (s *Server) reclaimInstanceENIs(instanceID string, inst *types.Instance, haveInst bool) {
+	seen := map[string]bool{}
+	var enis []vpc.ENI
+	if instanceID != "" {
+		enis, _ = s.ctrl.Store.VPC.ListENIsByInstance(instanceID)
+	}
+	primaryID := ""
+	if haveInst && inst != nil {
+		primaryID = inst.PrimaryENIID
+		if primaryID != "" {
+			if e, err := s.ctrl.Store.VPC.GetENI(primaryID); err == nil {
+				enis = append(enis, e)
+			}
+		}
+	}
+	for _, e := range enis {
+		if e.ID == "" || seen[e.ID] {
+			continue
+		}
+		seen[e.ID] = true
+		if !e.DeleteOnTermination && e.ID != primaryID {
+			_, _ = s.ctrl.Store.VPC.DetachENI(e.ID)
+			continue
+		}
+		_ = s.ctrl.Store.VPC.DeleteENI(e.ID)
+	}
 }

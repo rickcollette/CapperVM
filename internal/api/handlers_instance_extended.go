@@ -6,6 +6,10 @@ import (
 )
 
 func (s *Server) handleListKeyPairs(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "keypair:list", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	keys, err := s.ctrl.Store.VPC.ListKeyPairs(s.project)
 	if err != nil {
 		writeInternal(w, err)
@@ -15,6 +19,10 @@ func (s *Server) handleListKeyPairs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateKeyPair(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "keypair:create", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		Name      string `json:"name"`
 		PublicKey string `json:"publicKey"`
@@ -33,6 +41,10 @@ func (s *Server) handleCreateKeyPair(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetKeyPair(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "keypair:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	k, err := s.ctrl.Store.VPC.GetKeyPair(s.project, r.PathValue("keyName"))
 	if err != nil {
 		writeNotFound(w, "key pair not found")
@@ -42,6 +54,10 @@ func (s *Server) handleGetKeyPair(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteKeyPair(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "keypair:delete", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	if err := s.ctrl.Store.VPC.DeleteKeyPair(s.project, r.PathValue("keyName")); err != nil {
 		writeBadRequest(w, err)
 		return
@@ -55,6 +71,10 @@ func (s *Server) handleRebootInstance(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleProtectTermination(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if err := s.authorize(r, "instance:update", "instance/"+id); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	inst, err := s.ctrl.Store.ResolveInstance(id)
 	if err != nil {
 		writeNotFound(w, "instance not found")
@@ -67,6 +87,10 @@ func (s *Server) handleProtectTermination(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleUnprotectTermination(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if err := s.authorize(r, "instance:update", "instance/"+id); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	inst, err := s.ctrl.Store.ResolveInstance(id)
 	if err != nil {
 		writeNotFound(w, "instance not found")
@@ -78,6 +102,11 @@ func (s *Server) handleUnprotectTermination(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleAttachENIToInstance(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.authorize(r, "instance:update", "instance/"+id); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		ENIID           string `json:"eniId"`
 		AttachmentIndex int    `json:"attachmentIndex"`
@@ -86,7 +115,7 @@ func (s *Server) handleAttachENIToInstance(w http.ResponseWriter, r *http.Reques
 		writeBadRequest(w, err)
 		return
 	}
-	eni, err := s.ctrl.Store.VPC.AttachENI(req.ENIID, r.PathValue("id"), req.AttachmentIndex)
+	eni, err := s.ctrl.Store.VPC.AttachENI(req.ENIID, id, req.AttachmentIndex)
 	if err != nil {
 		writeBadRequest(w, err)
 		return
@@ -95,6 +124,11 @@ func (s *Server) handleAttachENIToInstance(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleDetachENIFromInstance(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.authorize(r, "instance:update", "instance/"+id); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		ENIID string `json:"eniId"`
 	}

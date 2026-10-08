@@ -11,7 +11,7 @@ func (m *Manager) CreateENI(vpcID, subnetID string, sgIDs []string, privateIP st
 	if sub.VPCID != vpcID {
 		return ENI{}, fmt.Errorf("subnet %s is not in vpc %s", subnetID, vpcID)
 	}
-	used := []string{}
+	used, _ := m.store.ListSubnetUsedIPs(subnetID)
 	enis, _ := m.store.ListENIs(vpcID)
 	for _, e := range enis {
 		used = append(used, e.PrivateIPAddresses...)
@@ -74,4 +74,12 @@ func (m *Manager) AssignENIPrivateIP(eniID, ip string, primary bool) error {
 
 func (m *Manager) DeleteENI(id string) error {
 	return m.store.DeleteENI(id)
+}
+
+func (m *Manager) ListENIsByInstance(instanceID string) ([]ENI, error) {
+	return m.store.ListENIsByInstance(instanceID)
+}
+
+func (m *Manager) ListENIsBySubnet(subnetID string) ([]ENI, error) {
+	return m.store.ListENIsBySubnet(subnetID)
 }

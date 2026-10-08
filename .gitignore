@@ -5,21 +5,6 @@
 /dist/
 /tmp/
 *.cap
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-compile_commands.json
-
-# Local AI assistant config, prompts, and generated handoff notes.
-/.claude/
-/.codex/
-/.cursor/
-/.aider*/
-CLAUDE.md
-AGENTS.md
-
-# Local archived working notes; source documentation belongs under docs/.
-/ARCHIVED/
 
 # Stray build binaries left at the repo root (use bin/ instead).
 /capper
@@ -54,6 +39,7 @@ coverage.html
 
 # Deploy secrets (Google OAuth client) — track the tooling, never the secret.
 deploy/oauth2.env
+deploy/local.env
 
 # apk.static workdir (alpine image build)
 /examples/alpine/apktools/
@@ -62,10 +48,5 @@ deploy/oauth2.env
 /examples/alma/rootfs/
 /examples/alma/downloads/
 
-# Rocky Linux image build artifacts
-/examples/rockylinux/rootfs/
-/examples/rockylinux/downloads/
-
-# Ubuntu Linux image build artifacts
-/examples/ubuntu/rootfs/
-/examples/ubuntu/downloads/
+# Local security scan outputs
+.security-reports/

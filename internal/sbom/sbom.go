@@ -9,6 +9,7 @@
 package sbom
 
 import (
+	"capper/internal/iox"
 	"archive/tar"
 	"crypto/sha256"
 	"encoding/hex"
@@ -268,7 +269,7 @@ func repackWithEntry(src string, dst io.Writer, entryName string, entryData []by
 		}
 		// Skip the entry being replaced; we append the new version below.
 		if hdr.Name == entryName {
-			if _, err := io.Copy(io.Discard, tr); err != nil {
+			if _, err := iox.CopyLimited(io.Discard, tr, iox.DefaultMaxArchiveEntry); err != nil {
 				return err
 			}
 			continue
@@ -305,7 +306,7 @@ func repackWithEntry(src string, dst io.Writer, entryName string, entryData []by
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
-		if _, err := io.Copy(tw, tr); err != nil {
+		if _, err := iox.CopyLimited(tw, tr, iox.DefaultMaxArchiveEntry); err != nil {
 			return err
 		}
 	}

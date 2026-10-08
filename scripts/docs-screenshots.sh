@@ -2,8 +2,8 @@
 # Build CapperWeb, start capper-run with console, seed a local docs user, capture screenshots.
 set -euo pipefail
 
-HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-ROOT="$(CDPATH= cd -- "$HERE/.." && pwd)"
+HERE="$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)"
+ROOT="$(CDPATH="" cd -- "$HERE/.." && pwd)"
 WEB="$ROOT/../CapperWeb"
 OUT="$ROOT/docs/assets/images/screenshots"
 LEGACY_OUT="$ROOT/docs/screenshots"
@@ -18,13 +18,10 @@ rm -rf "$OUT" "$LEGACY_OUT"
 mkdir -p "$OUT" "$LEGACY_OUT"
 
 say "Building Capper + CapperWeb"
-make CAPPERWEB_DIR="$WEB" dist web
+make dist web
 
 say "Seeding screenshot user ($USER) into store"
 go run ./tools/screenseed ./DIST/store --user "$USER:$PASS:admin" >/dev/null
-
-say "Seeding screenshot demo data"
-go run ./tools/screendemo ./DIST/store >/dev/null
 
 say "Bundling console into DIST"
 mkdir -p DIST/console

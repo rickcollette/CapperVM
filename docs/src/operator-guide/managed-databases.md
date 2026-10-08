@@ -19,7 +19,7 @@ control plane's *own* state store.
 ## Lifecycle
 
 ```bash
-capper db create my-db --engine postgres --version 16 --network app-net
+capper db create my-db --engine postgres --version 16 --subnet-id <subnet-id>
 capper db list
 capper db inspect my-db
 capper db restore my-db <backup>
@@ -31,7 +31,8 @@ capper db delete my-db
 | `--engine <engine>` | `postgres`, `redis`, or `mariadb` (required) |
 | `--version <ver>` | engine version (optional) |
 | `--port <n>` | database port (optional) |
-| `--subnet <id>` | attach to a VPC subnet (required for network reachability) |
+| `--subnet-id <id>` | VPC subnet to place the database in (**required**) |
+| `--vpc-id <id>` | VPC ID (optional; must match the subnet) |
 
 ## Backups and restore
 

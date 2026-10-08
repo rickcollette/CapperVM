@@ -10,6 +10,10 @@ import (
 )
 
 func (s *Server) handleAnalyzeReachability(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req networking.ReachabilityRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeBadRequest(w, err)
@@ -26,6 +30,10 @@ func (s *Server) handleAnalyzeReachability(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleListVpcEndpoints(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	eps, err := s.ctrl.Store.VPC.ListVPCEndpoints(vpcID)
 	if err != nil {
@@ -36,6 +44,10 @@ func (s *Server) handleListVpcEndpoints(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleCreateVpcEndpoint(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		VPCID        string   `json:"vpcId"`
 		Name         string   `json:"name"`
@@ -56,6 +68,10 @@ func (s *Server) handleCreateVpcEndpoint(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleListVpcPeerings(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	peerings, err := s.ctrl.Store.VPC.ListVPCPeerings(vpcID)
 	if err != nil {
@@ -66,6 +82,10 @@ func (s *Server) handleListVpcPeerings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateVpcPeering(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		RequesterVPCID string `json:"requesterVpcId"`
 		AccepterVPCID  string `json:"accepterVpcId"`
@@ -83,6 +103,10 @@ func (s *Server) handleCreateVpcPeering(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleListFlowLogs(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	resourceID := r.URL.Query().Get("resourceId")
 	logs, err := s.ctrl.Store.VPC.ListFlowLogs(resourceID)
 	if err != nil {
@@ -93,6 +117,10 @@ func (s *Server) handleListFlowLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateFlowLog(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		ResourceType string `json:"resourceType"`
 		ResourceID   string `json:"resourceId"`
@@ -111,6 +139,10 @@ func (s *Server) handleCreateFlowLog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNetworkTopologyGraph(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	graph, err := networking.BuildTopologyGraph(s.netSvc(), s.project)
 	if err != nil {
 		writeInternal(w, err)
@@ -120,6 +152,10 @@ func (s *Server) handleNetworkTopologyGraph(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleNetworkingDashboard(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	dash, err := networking.BuildDashboard(s.netSvc(), s.project)
 	if err != nil {
 		writeInternal(w, err)
@@ -129,6 +165,10 @@ func (s *Server) handleNetworkingDashboard(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleNetworkingDrift(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcRef := r.URL.Query().Get("vpcId")
 	if vpcRef == "" {
 		writeBadRequest(w, errMissing("vpcId"))
@@ -143,6 +183,10 @@ func (s *Server) handleNetworkingDrift(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListTargetGroups(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "lb:list", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	tgs, err := s.ctrl.Store.LB.ListTargetGroups(s.project)
 	if err != nil {
 		writeInternal(w, err)
@@ -152,22 +196,37 @@ func (s *Server) handleListTargetGroups(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleCreateTargetGroup(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "lb:create", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
-		Name       string `json:"name"`
-		VPCID      string `json:"vpcId"`
-		Protocol   string `json:"protocol"`
-		Port       int    `json:"port"`
-		HealthPath string `json:"healthPath"`
+		Name           string `json:"name"`
+		VPCID          string `json:"vpcId"`
+		LoadBalancerID string `json:"loadBalancerId"`
+		Protocol       string `json:"protocol"`
+		Port           int    `json:"port"`
+		HealthPath     string `json:"healthPath"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeBadRequest(w, err)
 		return
 	}
-	tg, err := s.ctrl.Store.LB.CreateTargetGroup(s.project, req.Name, req.VPCID, req.Protocol, req.Port, req.HealthPath)
+	if req.LoadBalancerID == "" {
+		writeError(w, http.StatusBadRequest, "loadBalancerId is required")
+		return
+	}
+	lbObj, err := s.ctrl.Store.LB.Get(req.LoadBalancerID, s.project)
+	if err != nil {
+		writeNotFound(w, "load balancer not found")
+		return
+	}
+	tg, err := s.ctrl.Store.LB.CreateTargetGroupForLB(lbObj.Name, s.project, req.Name, req.Protocol, req.Port, req.HealthPath)
 	if err != nil {
 		writeBadRequest(w, err)
 		return
 	}
+	_ = req.VPCID
 	writeJSON(w, http.StatusCreated, Envelope{Data: tg})
 }
 
@@ -221,6 +280,10 @@ func (s *Server) handleCreateLBListener(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleAssociateDNSZoneVPC(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "dns:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	zoneRef := r.PathValue("zone")
 	var req struct {
 		VPCID string `json:"vpcId"`
@@ -237,6 +300,10 @@ func (s *Server) handleAssociateDNSZoneVPC(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleDisassociateDNSZoneVPC(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "dns:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	zoneRef := r.PathValue("zone")
 	vpcID := r.URL.Query().Get("vpcId")
 	if vpcID == "" {
@@ -251,6 +318,10 @@ func (s *Server) handleDisassociateDNSZoneVPC(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) handleListDNSZoneVPCs(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "dns:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	zoneRef := r.PathValue("zone")
 	assocs, err := s.ctrl.Store.DNS.ListZoneVPCs(zoneRef)
 	if err != nil {
@@ -286,6 +357,10 @@ func (s *Server) handleListLaunchTemplateVersions(w http.ResponseWriter, r *http
 }
 
 func (s *Server) handleCreateLaunchTemplateVersion(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "launch-template:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		Config map[string]any `json:"config"`
 	}
@@ -329,8 +404,11 @@ func mergeLaunchTemplateIntoRequest(s *Server, project string, req *createInstan
 	if v, ok := cfg["subnetId"].(string); ok && v != "" && req.SubnetID == "" {
 		req.SubnetID = v
 	}
-	if v, ok := cfg["network"].(string); ok && v != "" && req.Network == "" {
-		req.Network = v
+	if v, ok := cfg["network"].(string); ok && v != "" {
+		if req.SubnetID == "" {
+			req.SubnetID = v
+		}
+		// legacy template field maps to subnetId; do not set Network (create rejects it)
 	}
 	if v, ok := cfg["keyName"].(string); ok && v != "" && req.KeyName == "" {
 		req.KeyName = v

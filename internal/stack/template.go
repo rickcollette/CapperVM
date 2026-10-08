@@ -33,11 +33,54 @@ type InstanceSpec struct {
 }
 
 type LBSpec struct {
-	Name    string `json:"name"`
-	Mode    string `json:"mode"`    // "tcp", "http"
-	Network string `json:"network,omitempty"`
-	Listen  string `json:"listen"`
-	Select  string `json:"select,omitempty"` // "label.role=web"
+	Name     string `json:"name"`
+	Mode     string `json:"mode"`               // "tcp", "http"
+	Network  string `json:"network,omitempty"`  // removed; use subnetId
+	SubnetID string `json:"subnetId,omitempty"` // required: VPC subnet the LB is placed in
+	VPCID    string `json:"vpcId,omitempty"`
+	Listen   string `json:"listen"`
+	Select   string `json:"select,omitempty"` // "label.role=web"
+}
+
+// Validate enforces VPC placement: networks[] and the legacy network fields
+// are rejected, and every instance and load balancer must set subnetId.
+func (t StackTemplate) Validate() error {
+	if len(t.Networks) > 0 {
+		return fmt.Errorf("stack networks[] is removed; use VPC subnets and set subnetId on instances")
+	}
+	for _, inst := range t.Instances {
+		if inst.Network != "" {
+			return fmt.Errorf("instance %q: network field is removed; use subnetId", inst.Name)
+		}
+		if inst.SubnetID == "" {
+			return fmt.Errorf("instance %q: subnetId is required", inst.Name)
+		}
+	}
+	for _, lb := range t.LBs {
+		if lb.Network != "" {
+			return fmt.Errorf("load balancer %q: network field is removed; use subnetId", lb.Name)
+		}
+		if lb.SubnetID == "" {
+			return fmt.Errorf("load balancer %q: subnetId is required", lb.Name)
+		}
+	}
+	return nil
+}
+
+// dnsSubnetID returns the VPC subnet private DNS zones from this template are
+// attached to: the first instance subnet, else the first load balancer subnet.
+func (t StackTemplate) dnsSubnetID() string {
+	for _, inst := range t.Instances {
+		if inst.SubnetID != "" {
+			return inst.SubnetID
+		}
+	}
+	for _, lb := range t.LBs {
+		if lb.SubnetID != "" {
+			return lb.SubnetID
+		}
+	}
+	return ""
 }
 
 type DNSSpec struct {

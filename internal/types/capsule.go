@@ -51,8 +51,9 @@ type CapsuleManifest struct {
 	Mounts         []Mount           `json:"mounts,omitempty"`
 	RestartPolicy  RestartPolicy     `json:"restartPolicy,omitempty"`
 	Policy         ImagePolicy       `json:"policy,omitempty"`
-	UseCapinit     bool              `json:"useCapinit,omitempty"`
-	MetadataToken  string            `json:"metadataToken,omitempty"` // host-side token file path
+	UseCapinit        bool   `json:"useCapinit,omitempty"`
+	MetadataToken     string `json:"metadataToken,omitempty"` // host-side token file path
+	PreferredRuntime  string `json:"preferredRuntime,omitempty"` // optional: auto|bwrap|chroot|crun|runc|lxc|qemu
 }
 
 type RootFSInfo struct {

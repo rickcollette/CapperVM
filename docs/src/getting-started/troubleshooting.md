@@ -25,7 +25,7 @@ capper aio logs        # stream AIO service logs
 
 **`bwrap` fails / user namespaces unavailable.** Capper prefers Bubblewrap with
 unprivileged user namespaces. If the host disallows them, either enable them, or
-fall back with `--runtime chroot` (may require `sudo`), or use `--runtime crun`/
+fall back with `--runtime chroot` (may require `sudo`), or use `--runtime crun`/`lxc`/`qemu` or 
 `runc` if installed. `capper host doctor` reports what is available.
 
 **A capsule is killed unexpectedly.** Check the resource limits you passed

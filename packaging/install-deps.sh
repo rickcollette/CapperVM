@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-GO_VERSION="${1:-1.23.5}"
+GO_VERSION="${1:-1.26.6}"
 NODE_MAJOR="${2:-20}"
 NODE_VERSION="${NODE_VERSION:-20.20.2}"
 CMAKE_VERSION="${CMAKE_VERSION:-3.31.8}"

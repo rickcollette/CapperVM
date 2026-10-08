@@ -31,14 +31,15 @@ func AnalyzeReachability(req ReachabilityRequest) ReachabilityResult {
 		return ReachabilityResult{Allowed: false, BlockingRule: "missing source or destination"}
 	}
 	return ReachabilityResult{
-		Allowed: true,
+		Allowed:      false,
+		BlockingRule: "insufficient security-group data for allow decision",
 		Path: []string{
 			fmt.Sprintf("%s:%s", req.SourceType, req.SourceID),
 			"route-table:evaluated",
-			"security-group:evaluated",
-			"network-acl:evaluated",
+			"security-group:indeterminate",
 			fmt.Sprintf("%s:%s", req.DestinationType, req.DestinationID),
 		},
+		Warnings: []string{"reachability requires security group evaluation; use AnalyzeReachabilityWithVPC"},
 	}
 }
 
@@ -58,12 +59,26 @@ func AnalyzeReachabilityWithVPC(req ReachabilityRequest, vpcMgr *vpc.Manager, in
 	if port == 0 {
 		port = req.Port
 	}
+	if len(instSGs) == 0 {
+		return ReachabilityResult{
+			Allowed:      false,
+			BlockingRule: "no security groups attached; deny by default",
+			Path:         path,
+		}
+	}
 	for _, sgID := range instSGs {
 		rules, err := vpcMgr.ListSGRules(sgID)
 		if err != nil {
 			continue
 		}
 		path = append(path, fmt.Sprintf("security-group:%s", sgID))
+		if len(rules) == 0 {
+			return ReachabilityResult{
+				Allowed:      false,
+				BlockingRule: fmt.Sprintf("security-group %s has no rules; deny by default", sgID),
+				Path:         path,
+			}
+		}
 		allowed := false
 		for _, r := range rules {
 			if r.Direction != vpc.SGIngress {
@@ -80,7 +95,7 @@ func AnalyzeReachabilityWithVPC(req ReachabilityRequest, vpcMgr *vpc.Manager, in
 				break
 			}
 		}
-		if !allowed && len(rules) > 0 {
+		if !allowed {
 			return ReachabilityResult{
 				Allowed:      false,
 				BlockingRule: fmt.Sprintf("security-group %s denies %s/%d", sgID, proto, port),

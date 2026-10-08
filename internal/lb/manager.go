@@ -249,7 +249,9 @@ func (m *Manager) SetListenerCertificate(lbName, project, listenerID, certID str
 	if err := m.store.SetListenerCertificate(listenerID, certID); err != nil {
 		return err
 	}
+	// Stop then reconcile so HTTPS picks up the new cert immediately.
 	m.stopProxy(listenerID)
+	_ = m.Reconcile(context.Background())
 	_ = lb
 	return nil
 }
@@ -299,13 +301,14 @@ func (m *Manager) DeleteTargetGroup(lbName, project, tgID string) error {
 	if err != nil {
 		return err
 	}
-	if tg.LoadBalancerID != "" && tg.LoadBalancerID != lb.ID {
+	if tg.LoadBalancerID != lb.ID {
 		return fmt.Errorf("target group does not belong to this load balancer")
 	}
 	listeners, _ := m.store.ListListeners(lb.ID)
 	for _, lst := range listeners {
 		if lst.TargetGroupID == tgID {
 			m.stopProxy(lst.ID)
+			_ = m.store.DeleteListener(lst.ID)
 		}
 	}
 	return m.store.DeleteTargetGroup(tgID)
@@ -336,7 +339,7 @@ func (m *Manager) AddTarget(lbName, project, tgID, address string) (Target, erro
 	if err != nil {
 		return Target{}, err
 	}
-	if tg.LoadBalancerID != "" && tg.LoadBalancerID != lb.ID {
+	if tg.LoadBalancerID != lb.ID {
 		return Target{}, fmt.Errorf("target group does not belong to this load balancer")
 	}
 	t, err := m.store.AddTarget(tgID, address, 1)

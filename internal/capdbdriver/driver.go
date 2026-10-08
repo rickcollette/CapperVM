@@ -57,7 +57,7 @@ type Driver struct{}
 func (Driver) Open(dsn string) (driver.Conn, error) {
 	c := &conn{}
 	curi := C.CString(dsn)
-	defer C.free(unsafe.Pointer(curi))
+	defer C.free(unsafe.Pointer(curi)) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 	rc := C.capdb_net_connect(curi, &c.h)
 	if rc != netOK || c.h == nil {
 		msg := errmsg(c.h)
@@ -204,7 +204,7 @@ func (c *conn) Begin() (driver.Tx, error) {
 // connection (read via capdb_net_changes / capdb_net_last_insert_rowid).
 func (c *conn) exec(sqlText string) error {
 	csql := C.CString(sqlText)
-	defer C.free(unsafe.Pointer(csql))
+	defer C.free(unsafe.Pointer(csql)) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 	rc := C.capdb_exec_noload(c.h, csql)
 	if int(rc) != netOK {
 		return c.err(rc)
@@ -294,7 +294,7 @@ func (s *stmt) doQuery(ctx context.Context, args []driver.Value) (*rows, error) 
 		return nil, err
 	}
 	csql := C.CString(sqlText)
-	defer C.free(unsafe.Pointer(csql))
+	defer C.free(unsafe.Pointer(csql)) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 	var st *C.capdb_net_stmt
 	if rc := C.capdb_net_prepare(s.c.h, csql, &st); int(rc) != netOK || st == nil {
 		return nil, s.c.err(rc)
@@ -386,7 +386,7 @@ func (r *rows) column(i int) driver.Value {
 		if p == nil {
 			return nil
 		}
-		return C.GoStringN((*C.char)(unsafe.Pointer(p)), n)
+		return C.GoStringN((*C.char)(unsafe.Pointer(p)), n) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 	}
 }
 
