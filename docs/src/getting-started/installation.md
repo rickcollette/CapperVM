@@ -59,7 +59,8 @@ client library. Build it only if you need a networked, connection-pooled databas
 shared by multiple processes:
 
 ```bash
-make build-capdb   # builds the vendored capdb/ then `go build -tags capdb`
+make capdb-fetch   # clone CapDB 3.7.2 into ./CapDB
+make build-capdb   # build the engine, then `go build -tags capdb`
 ```
 
 The default backend remains pure-Go SQLite unless you both build with `-tags capdb`

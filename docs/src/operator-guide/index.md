@@ -64,4 +64,3 @@ How to operate each Capper subsystem. New here? Start with the
 
 - [CLI reference](../reference/cli/capper.md) · [API reference](../reference/api/overview.md)
   · [Go SDK](../reference/sdk/go.md)
-- [Publishing beta releases](beta-releases.md)

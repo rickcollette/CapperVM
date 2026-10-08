@@ -300,31 +300,19 @@ func (s *Store) DeleteUser(nameOrID string) error {
 		return err
 	}
 	// Cascade: revoke the user's role grants, group memberships, and API tokens.
-	// All steps must succeed or the entire delete is aborted.
 	// Orphaned tokens are a security hole — they would keep authenticating as the
 	// removed principal.
-
-	// Step 1: Delete API tokens (critical for security).
-	if _, err := s.db.Exec(`DELETE FROM iam_tokens WHERE principal_type='user' AND principal_id=?`, u.ID); err != nil {
-		return fmt.Errorf("cannot delete user tokens: %w", err)
-	}
-
-	// Step 2: Delete role grants.
 	if _, err := s.db.Exec(`DELETE FROM iam_grants WHERE principal_type='user' AND principal_id=?`, u.ID); err != nil {
 		return fmt.Errorf("cannot delete user grants: %w", err)
 	}
-
-	// Step 3: Delete group memberships.
 	if _, err := s.db.Exec(`DELETE FROM iam_group_members WHERE user_id=?`, u.ID); err != nil {
 		return fmt.Errorf("cannot delete user group memberships: %w", err)
 	}
-
-	// Step 4: Finally, delete the user record.
-	if _, err := s.db.Exec(`DELETE FROM iam_users WHERE id=?`, u.ID); err != nil {
-		return fmt.Errorf("cannot delete user record: %w", err)
+	if _, err := s.db.Exec(`DELETE FROM iam_tokens WHERE principal_type='user' AND principal_id=?`, u.ID); err != nil {
+		return fmt.Errorf("cannot delete user tokens: %w", err)
 	}
-
-	return nil
+	_, err = s.db.Exec(`DELETE FROM iam_users WHERE id=?`, u.ID)
+	return err
 }
 
 // ---- groups -----------------------------------------------------------------
@@ -973,24 +961,14 @@ func (s *Store) UpdateGroupByAccount(accountID, groupID string, updates map[stri
 func (s *Store) DeleteGroupByAccount(accountID, groupID string) error {
 	// Cascade: drop memberships and any role grants made to the group so they
 	// aren't left dangling (and can't leak access if a group id is reused).
-	// All steps must succeed or the entire delete is aborted.
-
-	// Step 1: Delete group members.
 	if _, err := s.db.Exec(`DELETE FROM iam_group_members WHERE group_id=?`, groupID); err != nil {
-		return fmt.Errorf("cannot delete group members: %w", err)
+		return fmt.Errorf("cannot delete group memberships: %w", err)
 	}
-
-	// Step 2: Delete group role grants.
 	if _, err := s.db.Exec(`DELETE FROM iam_grants WHERE principal_type='group' AND principal_id=?`, groupID); err != nil {
 		return fmt.Errorf("cannot delete group grants: %w", err)
 	}
-
-	// Step 3: Delete the group itself.
-	if _, err := s.db.Exec(`DELETE FROM iam_groups WHERE id=? AND account_id=?`, groupID, accountID); err != nil {
-		return fmt.Errorf("cannot delete group: %w", err)
-	}
-
-	return nil
+	_, err := s.db.Exec(`DELETE FROM iam_groups WHERE id=? AND account_id=?`, groupID, accountID)
+	return err
 }
 
 func (s *Store) AddGroupMemberByAccount(accountID, groupID, userID string) error {

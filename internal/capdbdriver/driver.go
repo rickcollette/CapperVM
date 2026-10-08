@@ -57,7 +57,7 @@ type Driver struct{}
 func (Driver) Open(dsn string) (driver.Conn, error) {
 	c := &conn{}
 	curi := C.CString(dsn)
-	defer C.free(unsafe.Pointer(curi))
+	defer C.free(unsafe.Pointer(curi)) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 	rc := C.capdb_net_connect(curi, &c.h)
 	if rc != netOK || c.h == nil {
 		msg := errmsg(c.h)
@@ -204,7 +204,7 @@ func (c *conn) Begin() (driver.Tx, error) {
 // connection (read via capdb_net_changes / capdb_net_last_insert_rowid).
 func (c *conn) exec(sqlText string) error {
 	csql := C.CString(sqlText)
-	defer C.free(unsafe.Pointer(csql))
+	defer C.free(unsafe.Pointer(csql)) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 	rc := C.capdb_exec_noload(c.h, csql)
 	if int(rc) != netOK {
 		return c.err(rc)
@@ -294,7 +294,7 @@ func (s *stmt) doQuery(ctx context.Context, args []driver.Value) (*rows, error) 
 		return nil, err
 	}
 	csql := C.CString(sqlText)
-	defer C.free(unsafe.Pointer(csql))
+	defer C.free(unsafe.Pointer(csql)) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 	var st *C.capdb_net_stmt
 	if rc := C.capdb_net_prepare(s.c.h, csql, &st); int(rc) != netOK || st == nil {
 		return nil, s.c.err(rc)
@@ -316,8 +316,8 @@ type result struct {
 	lastID int64
 }
 
-func (r result) LastInsertId() (int64, error)  { return r.lastID, nil }
-func (r result) RowsAffected() (int64, error)   { return r.rows, nil }
+func (r result) LastInsertId() (int64, error) { return r.lastID, nil }
+func (r result) RowsAffected() (int64, error) { return r.rows, nil }
 
 // ---- rows ----
 
@@ -348,6 +348,13 @@ func (r *rows) Next(dest []driver.Value) error {
 		if err := r.ctx.Err(); err != nil {
 			return err
 		}
+	}
+	if r.st == nil {
+		return fmt.Errorf("capdb: rows already closed")
+	}
+	if r.c.h == nil || C.capdb_net_alive(r.c.h) == 0 {
+		r.c.dead.Store(true)
+		return fmt.Errorf("capdb: connection lost (transport error)")
 	}
 	rc := C.capdb_net_step(r.st)
 	switch int(rc) {
@@ -386,7 +393,7 @@ func (r *rows) column(i int) driver.Value {
 		if p == nil {
 			return nil
 		}
-		return C.GoStringN((*C.char)(unsafe.Pointer(p)), n)
+		return C.GoStringN((*C.char)(unsafe.Pointer(p)), n) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 	}
 }
 

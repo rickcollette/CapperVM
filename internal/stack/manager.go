@@ -2,7 +2,7 @@ package stack
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/sha256"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -52,8 +52,8 @@ func (m *Manager) List(project string) ([]Stack, error) {
 
 // Plan returns what would be created to apply tmpl.
 func (m *Manager) Plan(tmpl StackTemplate, project string) ([]PlanOp, error) {
-	if len(tmpl.Networks) > 0 {
-		return nil, fmt.Errorf("stack networks[] is removed; use VPC subnets")
+	if err := tmpl.Validate(); err != nil {
+		return nil, err
 	}
 	var ops []PlanOp
 	for _, inst := range tmpl.Instances {
@@ -70,6 +70,12 @@ func (m *Manager) Plan(tmpl StackTemplate, project string) ([]PlanOp, error) {
 
 // Apply creates or updates resources defined in tmpl.
 func (m *Manager) Apply(ctx context.Context, tmpl StackTemplate, project string) (*Stack, error) {
+	if err := tmpl.Validate(); err != nil {
+		return nil, err
+	}
+	if len(tmpl.DNS) > 0 && tmpl.dnsSubnetID() == "" {
+		return nil, fmt.Errorf("stack dns records require at least one instance or load balancer with a subnetId")
+	}
 	hash := templateHash(tmpl)
 
 	// Reuse or create the stack record.
@@ -94,10 +100,6 @@ func (m *Manager) Apply(ctx context.Context, tmpl StackTemplate, project string)
 
 	var resources []StackResource
 
-	if len(tmpl.Networks) > 0 {
-		return nil, fmt.Errorf("stack networks[] is removed; use VPC subnets")
-	}
-
 	// Instances — record only (image file must exist for actual launch)
 	for _, spec := range tmpl.Instances {
 		resources = append(resources, StackResource{Type: "instance", Name: spec.Name, ID: ""})
@@ -111,14 +113,8 @@ func (m *Manager) Apply(ctx context.Context, tmpl StackTemplate, project string)
 	// 4. DNS records
 	dnsMgr := capperdns.NewManager(m.deps.DNS)
 	for _, spec := range tmpl.DNS {
-		networkID := ""
-		// Try to find a network ID for the zone
-		for _, nr := range resources {
-			if nr.Type == "network" {
-				networkID = nr.ID
-				break
-			}
-		}
+		// Private zones attach to the VPC subnet (DNS networkId == subnet ID).
+		networkID := tmpl.dnsSubnetID()
 		z, zerr := dnsMgr.CreateZone(spec.Zone, capperdns.ZoneTypePrivate, networkID, 30, "stack:"+tmpl.Name)
 		if zerr != nil {
 			return nil, fmt.Errorf("stack: create zone %q: %w", spec.Zone, zerr)
@@ -227,7 +223,7 @@ func (m *Manager) ReconcileReplicas(ctx context.Context, project string) error {
 
 func templateHash(tmpl StackTemplate) string {
 	data, _ := json.Marshal(tmpl)
-	h := md5.Sum(data)
+	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
 }
 

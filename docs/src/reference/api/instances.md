@@ -41,9 +41,13 @@ All paths are under `/api/v1` and require [authentication](overview.md).
   "securityGroupIds": ["sg_…"],
   "instanceType": "cap-micro",
   "diskBytes": 10737418240,
+  "runtimeMode": "lxc",
   "labels": { "tier": "web" }
 }
 ```
+
+`runtimeMode` (optional): `auto`, `bwrap`, `chroot`, `crun`, `runc`, `lxc`, or `qemu`.
+When omitted, Capper uses the capsule `preferredRuntime` (if set) else the host `--runtime` default.
 
 **Requirements:**
 

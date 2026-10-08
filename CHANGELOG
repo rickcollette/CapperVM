@@ -1,0 +1,14 @@
+# Changelog
+
+## 1.0.1
+
+- Pin the CapDB engine to release 3.7.2 (`CAPDB_REF`, default `v3.7.2`).
+- Build `capdb-server` with the pool, network, volume store, and WAL replication options from that release. All-in-one installs still use one co-located server and a `--db-root` directory.
+- Ship the `capdb` shell in the AIO bundle and installer so online `.backup` runs on the installed host.
+- Record `capdbVersion` in the bundle manifest.
+- Drop a CapDB connection that dies while a result set is being read, so the client pool opens a replacement.
+- Document the external CapDB checkout. The tree no longer describes CapDB as a vendored `capdb/` directory.
+
+## 1.0.0
+
+- LXC and QEMU runtimes, multi-distro AIO release artifacts, VPC placement, and storage-pool gates.

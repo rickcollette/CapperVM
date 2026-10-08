@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"capper/internal/iox"
 	"archive/tar"
 	"crypto/rand"
 	"crypto/sha256"
@@ -598,7 +599,7 @@ func untarZstDir(src, dest string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(fh, tr); err != nil {
+			if _, err := iox.CopyLimited(fh, tr, iox.DefaultMaxArchiveEntry); err != nil {
 				fh.Close()
 				return err
 			}

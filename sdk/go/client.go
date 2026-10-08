@@ -235,13 +235,14 @@ func (c *Client) del(ctx context.Context, path string) error {
 type InstancesAPI struct{ c *Client }
 
 type Instance struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	Status    string            `json:"status"`
-	Image     string            `json:"image"`
-	NetworkIP string            `json:"networkIp"`
-	Labels    map[string]string `json:"labels"`
-	CreatedAt string            `json:"createdAt"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Status      string            `json:"status"`
+	Image       string            `json:"image"`
+	NetworkIP   string            `json:"networkIp"`
+	Labels      map[string]string `json:"labels"`
+	CreatedAt   string            `json:"createdAt"`
+	RuntimeMode string            `json:"runtimeMode,omitempty"`
 }
 
 func (a *InstancesAPI) List(ctx context.Context, project string) ([]Instance, error) {
@@ -283,12 +284,7 @@ type Network struct {
 }
 
 func (a *NetworksAPI) List(ctx context.Context, project string) ([]Network, error) {
-	path := "networks"
-	if project != "" {
-		path += "?project=" + url.QueryEscape(project)
-	}
-	var out struct{ Data []Network `json:"data"` }
-	return out.Data, a.c.get(ctx, path, &out)
+	return nil, fmt.Errorf("networks API removed; list VPCs and subnets via the VPCs/Subnets APIs")
 }
 
 // ---- Images -----------------------------------------------------------------
@@ -402,13 +398,14 @@ func (a *SearchAPI) Search(ctx context.Context, q, project, labelFilter, typeFil
 
 // CreateInstanceRequest is the request body for creating an instance.
 type CreateInstanceRequest struct {
-	Image    string            `json:"image"`
-	Name     string            `json:"name,omitempty"`
-	VPCID    string            `json:"vpcId,omitempty"`
-	SubnetID string            `json:"subnetId,omitempty"`
-	Labels   map[string]string `json:"labels,omitempty"`
-	Env      map[string]string `json:"env,omitempty"`
-	Command  string            `json:"command,omitempty"`
+	Image       string            `json:"image"`
+	Name        string            `json:"name,omitempty"`
+	VPCID       string            `json:"vpcId,omitempty"`
+	SubnetID    string            `json:"subnetId,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	Command     string            `json:"command,omitempty"`
+	RuntimeMode string            `json:"runtimeMode,omitempty"`
 }
 
 func (a *InstancesAPI) Create(ctx context.Context, req CreateInstanceRequest) (Instance, error) {
@@ -427,15 +424,11 @@ type CreateNetworkRequest struct {
 }
 
 func (a *NetworksAPI) Create(ctx context.Context, project string, req CreateNetworkRequest) (Network, error) {
-	var out struct{ Data Network `json:"data"` }
-	if project != "" {
-		req.Labels = mergeMaps(req.Labels, map[string]string{"project": project})
-	}
-	return out.Data, a.c.post(ctx, "networks", req, &out)
+	return Network{}, fmt.Errorf("networks API removed; create a subnet under a VPC via Subnets/VPCs APIs")
 }
 
 func (a *NetworksAPI) Delete(ctx context.Context, name string) error {
-	return a.c.del(ctx, "networks/"+name)
+	return fmt.Errorf("networks API removed; delete the subnet via Subnets/VPCs APIs")
 }
 
 // ---- DNS (extended) ---------------------------------------------------------
@@ -449,9 +442,12 @@ type DNSRecord struct {
 	TTL    int      `json:"ttl"`
 }
 
-func (a *DNSAPI) CreateZone(ctx context.Context, name string) (DNSZone, error) {
+// CreateZone creates a private hosted zone attached to a VPC subnet. subnetID is
+// sent as networkId (DNS networkId means VPC subnet ID) and is required.
+func (a *DNSAPI) CreateZone(ctx context.Context, name, subnetID string) (DNSZone, error) {
 	var out struct{ Data DNSZone `json:"data"` }
-	return out.Data, a.c.post(ctx, "dns/zones", map[string]string{"name": name}, &out)
+	body := map[string]string{"name": name, "networkId": subnetID}
+	return out.Data, a.c.post(ctx, "dns/zones", body, &out)
 }
 
 func (a *DNSAPI) DeleteZone(ctx context.Context, name string) error {

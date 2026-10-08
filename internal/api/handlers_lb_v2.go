@@ -188,7 +188,7 @@ func (s *Server) handleListLBTargets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tg, err := s.ctrl.Store.LB.Store().GetTargetGroup(tgID)
-	if err != nil || (tg.LoadBalancerID != "" && tg.LoadBalancerID != lbObj.ID) {
+	if err != nil || tg.LoadBalancerID != lbObj.ID {
 		writeNotFound(w, "target group not found")
 		return
 	}

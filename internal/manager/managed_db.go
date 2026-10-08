@@ -10,12 +10,20 @@ import (
 )
 
 // CreateManagedDatabase registers a managed DB, stores its password secret, and
-// launches the hidden alpine instance that runs the engine.
-func CreateManagedDatabase(st *store.Store, im InstanceManager, meta *metadata.Manager, name, project, engine, version, networkID string, port int) (database.ManagedDB, error) {
+// launches the hidden alpine instance that runs the engine. subnetID is the VPC
+// subnet the engine instance is placed in; netOpts carries the resolved
+// dataplane attachment (bridge, CIDR, gateway, preferred IP) and is required.
+func CreateManagedDatabase(st *store.Store, im InstanceManager, meta *metadata.Manager, name, project, engine, version, subnetID string, port int, netOpts *NetworkRunOpts) (database.ManagedDB, error) {
+	if subnetID == "" {
+		return database.ManagedDB{}, fmt.Errorf("database: subnetId is required")
+	}
+	if netOpts == nil {
+		return database.ManagedDB{}, fmt.Errorf("database: network placement is required")
+	}
 	if err := st.CheckHostDeployLimit(); err != nil {
 		return database.ManagedDB{}, err
 	}
-	db, password, err := st.Databases.Create(name, project, engine, version, networkID, port)
+	db, password, err := st.Databases.Create(name, project, engine, version, subnetID, port)
 	if err != nil {
 		return database.ManagedDB{}, err
 	}
@@ -23,7 +31,7 @@ func CreateManagedDatabase(st *store.Store, im InstanceManager, meta *metadata.M
 		_ = st.Databases.Delete(db.Name, project)
 		return database.ManagedDB{}, fmt.Errorf("database: store password secret: %w", err)
 	}
-	instanceID, err := im.ProvisionDatabase(meta, db, project, password, "alpine")
+	instanceID, err := im.ProvisionDatabase(meta, db, project, password, "alpine", netOpts)
 	if err != nil {
 		_ = st.Secrets.Delete(db.SecretName, project)
 		_ = st.Databases.Delete(db.Name, project)
@@ -38,42 +46,29 @@ func CreateManagedDatabase(st *store.Store, im InstanceManager, meta *metadata.M
 }
 
 // DeleteManagedDatabase removes the backing instance, secret, and DB record.
-// All cascade steps must succeed or the deletion is aborted.
 func DeleteManagedDatabase(st *store.Store, im InstanceManager, nameOrID, project string) (database.ManagedDB, error) {
 	db, err := st.Databases.Get(nameOrID, project)
 	if err != nil {
 		return database.ManagedDB{}, err
 	}
-
-	// Step 1: Stop the backing instance if it exists.
 	if db.InstanceID != "" {
-		_, _, stopErr := im.Stop(db.InstanceID, 5*time.Second, true)
-		if stopErr != nil {
+		if _, _, stopErr := im.Stop(db.InstanceID, 5*time.Second, true); stopErr != nil {
 			return database.ManagedDB{}, fmt.Errorf("cannot stop backing instance %s: %w", db.InstanceID, stopErr)
 		}
-
-		// Step 2: Remove the instance. If this fails, the instance is stopped but not
-		// removed, so it will be cleaned up by the janitor. Fail the delete so the
-		// operator knows to investigate.
+		if err := st.Databases.UpdateStatus(db.ID, project, database.DBStatusStopped); err != nil {
+			return database.ManagedDB{}, fmt.Errorf("cannot record stopped status for backing instance %s: %w", db.InstanceID, err)
+		}
 		if removeErr := im.Remove(db.InstanceID); removeErr != nil {
 			return database.ManagedDB{}, fmt.Errorf("cannot remove backing instance %s: %w", db.InstanceID, removeErr)
 		}
 	}
-
-	// Step 3: Delete the password secret. This is best-effort; if it fails, log but
-	// continue so the DB record can be cleaned up. The orphaned secret will be
-	// cleaned up by janitor or manual intervention.
 	if db.SecretName != "" {
 		if secretErr := st.Secrets.Delete(db.SecretName, project); secretErr != nil {
-			// Log for operational visibility but don't fail the entire delete
-			fmt.Printf("warning: failed to delete database secret %s: %v\n", db.SecretName, secretErr)
+			return database.ManagedDB{}, fmt.Errorf("database: delete secret %s: %w", db.SecretName, secretErr)
 		}
 	}
-
-	// Step 4: Delete the database record. This is the final step.
 	if err := st.Databases.Delete(nameOrID, project); err != nil {
-		return database.ManagedDB{}, fmt.Errorf("cannot delete database record: %w", err)
+		return database.ManagedDB{}, err
 	}
-
 	return db, nil
 }

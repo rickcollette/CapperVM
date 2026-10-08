@@ -2,14 +2,64 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"capper/internal/vpc"
 )
 
 func (s *Server) handleListENIs(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "eni:list", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
-	enis, err := s.ctrl.Store.VPC.ListENIs(vpcID)
+	subnetID := r.URL.Query().Get("subnetId")
+	if vpcID != "" {
+		v, err := s.ctrl.Store.VPC.GetVPC(vpcID, s.project)
+		if err != nil {
+			writeNotFound(w, "vpc not found")
+			return
+		}
+		vpcID = v.ID
+	}
+	var enis []vpc.ENI
+	var err error
+	if vpcID == "" && subnetID == "" {
+		vpcs, listErr := s.ctrl.Store.VPC.ListVPCs(s.project)
+		if listErr != nil {
+			writeInternal(w, listErr)
+			return
+		}
+		enis = make([]vpc.ENI, 0)
+		for _, v := range vpcs {
+			vpcENIs, listErr := s.ctrl.Store.VPC.ListENIs(v.ID)
+			if listErr != nil {
+				writeInternal(w, listErr)
+				return
+			}
+			enis = append(enis, vpcENIs...)
+		}
+	} else if subnetID != "" {
+		subnet, serr := s.ctrl.Store.VPC.GetSubnetByID(subnetID)
+		if serr != nil {
+			writeNotFound(w, "subnet not found")
+			return
+		}
+		if vpcID != "" && subnet.VPCID != vpcID {
+			writeBadRequest(w, fmt.Errorf("subnet %s is not in vpc %s", subnetID, vpcID))
+			return
+		}
+		if vpcID == "" {
+			if _, err := s.ctrl.Store.VPC.GetVPC(subnet.VPCID, s.project); err != nil {
+				writeNotFound(w, "subnet not found")
+				return
+			}
+		}
+		enis, err = s.ctrl.Store.VPC.ListENIsBySubnet(subnet.ID)
+	} else {
+		enis, err = s.ctrl.Store.VPC.ListENIs(vpcID)
+	}
 	if err != nil {
 		writeInternal(w, err)
 		return
@@ -18,14 +68,39 @@ func (s *Server) handleListENIs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateENI(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "eni:create", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
-		VPCID      string   `json:"vpcId"`
-		SubnetID   string   `json:"subnetId"`
-		PrivateIP  string   `json:"privateIpAddress"`
-		SGIDs      []string `json:"securityGroupIds"`
+		VPCID     string   `json:"vpcId"`
+		SubnetID  string   `json:"subnetId"`
+		PrivateIP string   `json:"privateIpAddress"`
+		SGIDs     []string `json:"securityGroupIds"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeBadRequest(w, err)
+		return
+	}
+	if req.VPCID == "" {
+		writeBadRequest(w, fmt.Errorf("vpcId is required"))
+		return
+	}
+	if req.SubnetID == "" {
+		writeBadRequest(w, fmt.Errorf("subnetId is required"))
+		return
+	}
+	sub, serr := s.ctrl.Store.VPC.GetSubnetByID(req.SubnetID)
+	if serr != nil {
+		writeBadRequest(w, fmt.Errorf("subnet not found: %w", serr))
+		return
+	}
+	if sub.VPCID != req.VPCID {
+		writeBadRequest(w, fmt.Errorf("subnet %s is not in vpc %s", req.SubnetID, req.VPCID))
+		return
+	}
+	if _, err := s.ctrl.Store.VPC.GetVPC(req.VPCID, s.project); err != nil {
+		writeBadRequest(w, fmt.Errorf("vpc %s not found in project", req.VPCID))
 		return
 	}
 	eni, err := s.ctrl.Store.VPC.CreateENI(req.VPCID, req.SubnetID, req.SGIDs, req.PrivateIP)
@@ -37,6 +112,10 @@ func (s *Server) handleCreateENI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetENI(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "eni:inspect", "eni/"+r.PathValue("eniId")); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	eni, err := s.ctrl.Store.VPC.GetENI(r.PathValue("eniId"))
 	if err != nil {
 		writeNotFound(w, "eni not found")
@@ -46,6 +125,10 @@ func (s *Server) handleGetENI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteENI(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "eni:delete", "eni/"+r.PathValue("eniId")); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	if err := s.ctrl.Store.VPC.DeleteENI(r.PathValue("eniId")); err != nil {
 		writeBadRequest(w, err)
 		return
@@ -54,6 +137,10 @@ func (s *Server) handleDeleteENI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAttachENI(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "eni:attach", "eni/"+r.PathValue("eniId")); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		InstanceID      string `json:"instanceId"`
 		AttachmentIndex int    `json:"attachmentIndex"`
@@ -71,6 +158,10 @@ func (s *Server) handleAttachENI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDetachENI(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "eni:detach", "eni/"+r.PathValue("eniId")); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	eni, err := s.ctrl.Store.VPC.DetachENI(r.PathValue("eniId"))
 	if err != nil {
 		writeBadRequest(w, err)
@@ -80,6 +171,10 @@ func (s *Server) handleDetachENI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAssignENIPrivateIP(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "eni:update", "eni/"+r.PathValue("eniId")); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		PrivateIP string `json:"privateIpAddress"`
 	}

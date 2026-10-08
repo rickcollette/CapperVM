@@ -122,13 +122,20 @@ const lbCols = `id, name, project, network_id, subnet_id, vpc_id, scheme, type, 
 	routable_ip_id, eni_id, dns_name, mode, listen_addr, status, algorithm, selector, tls_cert_name,
 	service_alias, created_at`
 
+const (
+	selectLBByIDOrName = `SELECT id, name, project, network_id, subnet_id, vpc_id, scheme, type, vip_address, routable_ip_id, eni_id, dns_name, mode, listen_addr, status, algorithm, selector, tls_cert_name, service_alias, created_at FROM lb_load_balancers WHERE (id=? OR name=?) LIMIT 1`
+	selectLBByIDOrNameProject = `SELECT id, name, project, network_id, subnet_id, vpc_id, scheme, type, vip_address, routable_ip_id, eni_id, dns_name, mode, listen_addr, status, algorithm, selector, tls_cert_name, service_alias, created_at FROM lb_load_balancers WHERE (id=? OR name=?) AND project=? LIMIT 1`
+	selectAllLBs = `SELECT id, name, project, network_id, subnet_id, vpc_id, scheme, type, vip_address, routable_ip_id, eni_id, dns_name, mode, listen_addr, status, algorithm, selector, tls_cert_name, service_alias, created_at FROM lb_load_balancers ORDER BY name`
+	selectLBsByProject = `SELECT id, name, project, network_id, subnet_id, vpc_id, scheme, type, vip_address, routable_ip_id, eni_id, dns_name, mode, listen_addr, status, algorithm, selector, tls_cert_name, service_alias, created_at FROM lb_load_balancers WHERE project=? ORDER BY name`
+)
+
+
 func (s *Store) Get(nameOrID, project string) (LoadBalancer, error) {
 	var row *sql.Row
-	q := `SELECT ` + lbCols + ` FROM lb_load_balancers WHERE (id=? OR name=?)`
 	if project == "" {
-		row = s.db.QueryRow(q+` LIMIT 1`, nameOrID, nameOrID)
+		row = s.db.QueryRow(selectLBByIDOrName, nameOrID, nameOrID)
 	} else {
-		row = s.db.QueryRow(q+` AND project=? LIMIT 1`, nameOrID, nameOrID, project)
+		row = s.db.QueryRow(selectLBByIDOrNameProject, nameOrID, nameOrID, project)
 	}
 	return scanLB(row)
 }
@@ -138,11 +145,10 @@ func (s *Store) List(project string) ([]LoadBalancer, error) {
 		rows *sql.Rows
 		err  error
 	)
-	q := `SELECT ` + lbCols + ` FROM lb_load_balancers`
 	if project == "" {
-		rows, err = s.db.Query(q + ` ORDER BY name`)
+		rows, err = s.db.Query(selectAllLBs)
 	} else {
-		rows, err = s.db.Query(q+` WHERE project=? ORDER BY name`, project)
+		rows, err = s.db.Query(selectLBsByProject, project)
 	}
 	if err != nil {
 		return nil, err
@@ -210,55 +216,27 @@ func (s *Store) SetVIP(id, vip, routableIPID string) error {
 }
 
 func (s *Store) Delete(nameOrID, project string) error {
-	lb, gerr := s.Get(nameOrID, project)
-	if gerr != nil {
-		return fmt.Errorf("cannot find load balancer: %w", gerr)
-	}
-
-	// CASCADE DELETE: delete children first, then parent.
-	// This ensures that if any step fails, the parent is not deleted and orphans
-	// are avoided.
-
-	// Step 1: Delete load balancer backends.
-	if _, err := s.db.Exec(`DELETE FROM lb_backends WHERE lb_id=?`, lb.ID); err != nil {
-		return fmt.Errorf("cannot delete lb backends: %w", err)
-	}
-
-	// Step 2: Delete target group targets.
-	if _, err := s.db.Exec(
-		`DELETE FROM lb_target_group_targets WHERE target_group_id IN (SELECT id FROM lb_target_groups WHERE load_balancer_id=?)`,
-		lb.ID); err != nil {
-		return fmt.Errorf("cannot delete lb target group targets: %w", err)
-	}
-
-	// Step 3: Delete listeners.
-	if _, err := s.db.Exec(`DELETE FROM lb_listeners WHERE load_balancer_id=?`, lb.ID); err != nil {
-		return fmt.Errorf("cannot delete lb listeners: %w", err)
-	}
-
-	// Step 4: Delete target groups.
-	if _, err := s.db.Exec(`DELETE FROM lb_target_groups WHERE load_balancer_id=?`, lb.ID); err != nil {
-		return fmt.Errorf("cannot delete lb target groups: %w", err)
-	}
-
-	// Step 5: Finally, delete the load balancer itself.
-	var res sql.Result
-	var err error
-	if project == "" {
-		res, err = s.db.Exec(`DELETE FROM lb_load_balancers WHERE id=? OR name=?`, nameOrID, nameOrID)
-	} else {
-		res, err = s.db.Exec(`DELETE FROM lb_load_balancers WHERE (id=? OR name=?) AND project=?`,
-			nameOrID, nameOrID, project)
-	}
+	lb, err := s.Get(nameOrID, project)
 	if err != nil {
-		return fmt.Errorf("cannot delete load balancer: %w", err)
+		return err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("lb %q not found", nameOrID)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
 	}
-
-	return nil
+	defer tx.Rollback()
+	for _, query := range []string{
+		`DELETE FROM lb_target_group_targets WHERE target_group_id IN (SELECT id FROM lb_target_groups WHERE load_balancer_id=?)`,
+		`DELETE FROM lb_backends WHERE lb_id=?`,
+		`DELETE FROM lb_listeners WHERE load_balancer_id=?`,
+		`DELETE FROM lb_target_groups WHERE load_balancer_id=?`,
+		`DELETE FROM lb_load_balancers WHERE id=?`,
+	} {
+		if _, err := tx.Exec(query, lb.ID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) AddBackend(lbID, address string) (Backend, error) {

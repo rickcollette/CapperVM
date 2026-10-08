@@ -20,7 +20,7 @@ outputs:
 | **AIO (all-in-one)** | A single-node deployment running the API, daemon, and services together (`capper aio`). |
 | **Autoscale** | Policy-driven resizing of a compute group between min/max. |
 | **Bottle** | A declarative app deployment (`capper bottle`). |
-| **CapDB** | A vendored SQLite fork with a TLS client/server protocol and native pool; the optional networked control-plane backend. |
+| **CapDB** | SQLite fork (pinned at 3.7.2) with a TLS client/server protocol, native pool, volume store, and WAL replication primitives. Optional networked control-plane backend, checked out by `make capdb-fetch`. |
 | **Compute group** | A managed set of instances kept at a desired size. |
 | **Control plane** | The authoritative daemon that owns state, serves the API, and runs reconcilers. |
 | **CSD** | Capper shared/replicated volumes mountable across nodes. |

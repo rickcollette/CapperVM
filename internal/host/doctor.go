@@ -17,6 +17,10 @@ func RunDoctor(storeRoot string) []DoctorResult {
 		checkBwrap(),
 		checkCrun(),
 		checkRunc(),
+		checkLXC(),
+		checkQEMU(),
+		checkQEMUImg(),
+		checkKVM(),
 		checkNftables(),
 		checkDisk(storeRoot),
 		checkClockSync(),
@@ -125,6 +129,60 @@ func checkClockSync() DoctorResult {
 		Check:   name,
 		Pass:    false,
 		Message: "no NTP daemon detected; clock drift may affect log timestamps",
+	}
+}
+
+
+func checkLXC() DoctorResult {
+	const name = "lxc (lxc-start)"
+	if _, err := exec.LookPath("lxc-start"); err != nil {
+		return fail(name, "lxc-start not found; install lxc for --runtime lxc / runtimeMode=lxc")
+	}
+	return checkBinary("lxc-start", name)
+}
+
+func checkQEMU() DoctorResult {
+	const name = "qemu-system"
+	for _, bin := range []string{"qemu-system-x86_64", "qemu-system-aarch64", "qemu-system-" + goarch()} {
+		if path, err := exec.LookPath(bin); err == nil {
+			return pass(name, path)
+		}
+	}
+	return fail(name, "qemu-system-* not found; install qemu-system for runtimeMode=qemu")
+}
+
+func checkQEMUImg() DoctorResult {
+	return checkBinary("qemu-img", "qemu-img")
+}
+
+func checkKVM() DoctorResult {
+	const name = "KVM (/dev/kvm)"
+	f, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
+	if err != nil {
+		return DoctorResult{
+			Check:   name,
+			Pass:    false,
+			Message: "/dev/kvm not usable; QEMU will fall back to TCG (slower): " + err.Error(),
+		}
+	}
+	_ = f.Close()
+	return pass(name, "/dev/kvm readable/writable")
+}
+
+func goarch() string {
+	// lightweight to avoid importing runtime in doctor hot path naming
+	out, err := exec.Command("uname", "-m").Output()
+	if err != nil {
+		return "x86_64"
+	}
+	m := strings.TrimSpace(string(out))
+	switch m {
+	case "x86_64", "amd64":
+		return "x86_64"
+	case "aarch64", "arm64":
+		return "aarch64"
+	default:
+		return m
 	}
 }
 

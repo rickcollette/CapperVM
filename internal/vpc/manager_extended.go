@@ -90,13 +90,12 @@ func (m *Manager) CreateVPCExtended(opts CreateVPCOptions) (VPC, error) {
 	}
 	rollback := func() { _ = m.store.DeleteVPC(v.ID, opts.Project) }
 
-	rt, err := m.CreateRouteTable(v.ID, "main")
+	rt, err := m.CreateRouteTableMain(v.ID, "main")
 	if err != nil {
 		rollback()
 		return VPC{}, err
 	}
 	_, _ = m.AddRoute(rt.ID, v.CIDR, "local", "")
-	rt.IsMain = true
 	v.MainRouteTableID = rt.ID
 
 	sg, err := m.CreateSecurityGroup(v.ID, "default", "default VPC security group", true)

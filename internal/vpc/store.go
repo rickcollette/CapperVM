@@ -229,6 +229,12 @@ func (s *Store) DeleteVPC(nameOrID, project string) error {
 			q    string
 			args []any
 		}{
+			{`DELETE FROM capvpc_eni_security_groups WHERE eni_id IN (SELECT id FROM capvpc_enis WHERE vpc_id=?)`, []any{id}},
+			{`DELETE FROM capvpc_eni_private_ips WHERE eni_id IN (SELECT id FROM capvpc_enis WHERE vpc_id=?)`, []any{id}},
+			{`DELETE FROM capvpc_enis WHERE vpc_id=?`, []any{id}},
+			{`DELETE FROM capvpc_network_acl_entries WHERE network_acl_id IN (SELECT id FROM capvpc_network_acls WHERE vpc_id=?)`, []any{id}},
+			{`DELETE FROM capvpc_subnet_acl_assoc WHERE subnet_id IN (SELECT id FROM capvpc_subnets WHERE vpc_id=?)`, []any{id}},
+			{`DELETE FROM capvpc_network_acls WHERE vpc_id=?`, []any{id}},
 			{`DELETE FROM capvpc_routes WHERE route_table_id IN (SELECT id FROM capvpc_route_tables WHERE vpc_id=?)`, []any{id}},
 			{`DELETE FROM capvpc_subnet_rt_assoc WHERE subnet_id IN (SELECT id FROM capvpc_subnets WHERE vpc_id=?)`, []any{id}},
 			{`DELETE FROM capvpc_sg_rules WHERE security_group_id IN (SELECT id FROM capvpc_security_groups WHERE vpc_id=?)`, []any{id}},
@@ -236,6 +242,9 @@ func (s *Store) DeleteVPC(nameOrID, project string) error {
 			{`DELETE FROM capvpc_security_groups WHERE vpc_id=?`, []any{id}},
 			{`DELETE FROM capvpc_nat_gateways WHERE vpc_id=?`, []any{id}},
 			{`DELETE FROM capvpc_internet_gateways WHERE vpc_id=?`, []any{id}},
+			{`DELETE FROM capvpc_endpoints WHERE vpc_id=?`, []any{id}},
+			{`DELETE FROM capvpc_peerings WHERE requester_vpc_id=? OR accepter_vpc_id=?`, []any{id, id}},
+			{`DELETE FROM capvpc_flow_logs WHERE resource_id=? OR resource_id IN (SELECT id FROM capvpc_subnets WHERE vpc_id=?)`, []any{id, id}},
 			{`DELETE FROM capvpc_subnets WHERE vpc_id=?`, []any{id}},
 		}
 		for _, st := range stmts {
@@ -293,10 +302,23 @@ func (s *Store) DeleteSubnet(nameOrID, vpcID string) error {
 // ---- RouteTable CRUD --------------------------------------------------------
 
 func (s *Store) InsertRouteTable(rt RouteTable) error {
+	isMain := 0
+	if rt.IsMain {
+		isMain = 1
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO capvpc_route_tables (id, vpc_id, name, created_at) VALUES (?, ?, ?, ?)`,
-		rt.ID, rt.VPCID, rt.Name, rt.CreatedAt,
+		`INSERT INTO capvpc_route_tables (id, vpc_id, name, is_main, created_at) VALUES (?, ?, ?, ?, ?)`,
+		rt.ID, rt.VPCID, rt.Name, isMain, rt.CreatedAt,
 	)
+	return err
+}
+
+func (s *Store) SetRouteTableMain(id string, isMain bool) error {
+	v := 0
+	if isMain {
+		v = 1
+	}
+	_, err := s.db.Exec(`UPDATE capvpc_route_tables SET is_main=? WHERE id=?`, v, id)
 	return err
 }
 
@@ -388,11 +410,24 @@ func (s *Store) DeleteRoute(id string) error {
 }
 
 func (s *Store) AssociateSubnetRouteTable(subnetID, routeTableID string) error {
-	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO capvpc_subnet_rt_assoc (subnet_id, route_table_id) VALUES (?, ?)`,
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`DELETE FROM capvpc_subnet_rt_assoc WHERE subnet_id=?`, subnetID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO capvpc_subnet_rt_assoc (subnet_id, route_table_id) VALUES (?, ?)`,
 		subnetID, routeTableID,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE capvpc_subnets SET route_table_id=? WHERE id=?`, routeTableID, subnetID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ---- SecurityGroup CRUD -----------------------------------------------------
@@ -407,6 +442,20 @@ func (s *Store) InsertSecurityGroup(sg SecurityGroup) error {
 		sg.ID, sg.VPCID, sg.Name, sg.Description, deny, sg.CreatedAt,
 	)
 	return err
+}
+
+func (s *Store) GetSecurityGroupByID(id string) (SecurityGroup, error) {
+	var sg SecurityGroup
+	var deny int
+	err := s.db.QueryRow(
+		`SELECT id, vpc_id, name, description, default_deny, created_at FROM capvpc_security_groups WHERE id=?`,
+		id,
+	).Scan(&sg.ID, &sg.VPCID, &sg.Name, &sg.Description, &deny, &sg.CreatedAt)
+	if err == sql.ErrNoRows {
+		return sg, fmt.Errorf("security group %q not found", id)
+	}
+	sg.DefaultDeny = deny == 1
+	return sg, err
 }
 
 func (s *Store) GetSecurityGroup(nameOrID, vpcID string) (SecurityGroup, error) {

@@ -37,7 +37,8 @@ make capper-run-stop
 ## CapDB backend (optional, cgo)
 
 ```bash
-make capdb          # build the vendored CapDB client lib + capdb-server
+make capdb-fetch    # clone CapDB and detach at CAPDB_REF (default v3.7.2)
+make capdb          # build libcapdb_client.a, capdb-server, and the capdb shell
 make build-capdb    # build capper with -tags capdb (cgo + OpenSSL)
 make test-capdb     # driver conformance + integration tests against a live server
 ```

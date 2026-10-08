@@ -1,6 +1,7 @@
 package loader
 
 import (
+	"capper/internal/iox"
 	"archive/tar"
 	"crypto/sha256"
 	"encoding/hex"
@@ -177,7 +178,7 @@ func ExtractRootFSTar(reader io.Reader, dest string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(out, tr); err != nil {
+			if _, err := iox.CopyLimited(out, tr, iox.DefaultMaxArchiveEntry); err != nil {
 				out.Close()
 				return err
 			}
@@ -286,7 +287,7 @@ func ExtractTar(reader io.Reader, dest string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(out, tr); err != nil {
+			if _, err := iox.CopyLimited(out, tr, iox.DefaultMaxArchiveEntry); err != nil {
 				out.Close()
 				return err
 			}

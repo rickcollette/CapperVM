@@ -237,13 +237,25 @@ func (s *Store) AddTarget(tgID, address string, weight int) (Target, error) {
 		Address:       address,
 		Weight:        weight,
 	}
-	_, err := s.db.Exec(
+	res, err := s.db.Exec(
 		`INSERT INTO lb_target_group_targets (id, target_group_id, address, weight) VALUES (?, ?, ?, ?)
 		 ON CONFLICT(target_group_id, address) DO NOTHING`,
 		t.ID, tgID, address, weight,
 	)
 	if err != nil {
 		return Target{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		// Return the existing row rather than a fabricated id.
+		row := s.db.QueryRow(
+			`SELECT id, target_group_id, address, weight FROM lb_target_group_targets WHERE target_group_id=? AND address=?`,
+			tgID, address,
+		)
+		var existing Target
+		if err := row.Scan(&existing.ID, &existing.TargetGroupID, &existing.Address, &existing.Weight); err != nil {
+			return Target{}, fmt.Errorf("target already exists but could not be loaded: %w", err)
+		}
+		return existing, nil
 	}
 	return t, nil
 }

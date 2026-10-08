@@ -30,6 +30,7 @@ type Instance struct {
 	PublicIPAddress  string            `json:"publicIpAddress,omitempty"`
 	SecurityGroupIDs []string          `json:"securityGroupIds,omitempty"`
 	InstanceType     string            `json:"instanceType,omitempty"`
+	RuntimeMode      string            `json:"runtimeMode,omitempty"` // auto|bwrap|chroot|crun|runc|lxc|qemu
 	KeyName          string            `json:"keyName,omitempty"`
 	IAMRoleID        string            `json:"iamRoleId,omitempty"`
 	TerminationProtection bool         `json:"terminationProtection,omitempty"`

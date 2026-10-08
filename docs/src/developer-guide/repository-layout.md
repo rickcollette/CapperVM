@@ -1,6 +1,6 @@
 ---
 title: "Repository layout"
-description: "Where the binaries, subsystems, SDK, vendored database, and docs live."
+description: "Where the binaries, subsystems, SDK, and docs live."
 owner: "docs"
 status: "stable"
 reviewed: "2026-06-12"
@@ -31,7 +31,7 @@ internal/       all subsystems (one package per area) + the control plane
   capdbdriver/    the cgo CapDB client driver (-tags capdb)
   cli/            cobra command tree (all `capper` commands)
 sdk/go/         the Go SDK client (one group per subsystem)
-capdb/          vendored CapDB (SQLite fork) — C sources, server, review docs
+CapDB/          gitignored checkout of CapDB (make capdb-fetch, CAPDB_REF)
 docs/           this documentation (src/ authored, dist/ + generated/ built)
 tools/docgen/   the documentation generator (check/inventory/markdown/web/pdf)
 examples/ testdata/ schemas/   samples and fixtures

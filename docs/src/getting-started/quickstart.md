@@ -27,7 +27,7 @@ go run ./cmd/capper --store /tmp/capper-alpine list instances
 ```
 
 Capper prefers Bubblewrap (`bwrap`) with unprivileged user namespaces and falls
-back to `chroot`. Choose explicitly with `--runtime bwrap|chroot|crun|runc`. Limit
+back to `chroot`. Choose explicitly with `--runtime bwrap|chroot|crun|runc|lxc|qemu`. Limit
 resources:
 
 ```bash

@@ -327,8 +327,7 @@ func (s *Store) InsertBinding(b IPBinding) (IPBinding, error) {
 
 // ListBindings returns bindings for an address.
 func (s *Store) ListBindings(ipID string) ([]IPBinding, error) {
-	rows, err := s.db.Query(`SELECT id, ip_id, target_type, target_id, binding_mode, protocol,
-		external_port, internal_ip, internal_port, status, created_at, updated_at
+	rows, err := s.db.Query(`SELECT `+bindingCols+`
 		FROM routable_ip_bindings WHERE ip_id=?`, ipID)
 	if err != nil {
 		return nil, err
@@ -336,14 +335,40 @@ func (s *Store) ListBindings(ipID string) ([]IPBinding, error) {
 	defer rows.Close()
 	var out []IPBinding
 	for rows.Next() {
-		var b IPBinding
-		if err := rows.Scan(&b.ID, &b.IPID, &b.TargetType, &b.TargetID, &b.BindingMode, &b.Protocol,
-			&b.ExternalPort, &b.InternalIP, &b.InternalPort, &b.Status, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		b, err := scanBinding(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+const bindingCols = `id, ip_id, target_type, target_id, binding_mode, protocol,
+	external_port, internal_ip, internal_port, status, created_at, updated_at`
+
+func scanBinding(row interface{ Scan(...any) error }) (IPBinding, error) {
+	var b IPBinding
+	err := row.Scan(&b.ID, &b.IPID, &b.TargetType, &b.TargetID, &b.BindingMode, &b.Protocol,
+		&b.ExternalPort, &b.InternalIP, &b.InternalPort, &b.Status, &b.CreatedAt, &b.UpdatedAt)
+	return b, err
+}
+
+// GetBinding returns a binding by association ID.
+func (s *Store) GetBinding(bindingID string) (IPBinding, error) {
+	return scanBinding(s.db.QueryRow(`SELECT `+bindingCols+` FROM routable_ip_bindings WHERE id=?`, bindingID))
+}
+
+// DeleteBinding removes one association.
+func (s *Store) DeleteBinding(bindingID string) error {
+	res, err := s.db.Exec(`DELETE FROM routable_ip_bindings WHERE id=?`, bindingID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // DeleteBindingsForIP removes all bindings for an address.

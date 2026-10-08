@@ -9,106 +9,100 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"capper/internal/adminconfig"
+	capperdns "capper/internal/dns"
 	"capper/internal/ai"
 	"capper/internal/alert"
-	"capper/internal/audit"
-	autoscalestore "capper/internal/autoscale/store"
 	"capper/internal/backup"
-	"capper/internal/billing"
-	bottlestore "capper/internal/bottle/store"
-	"capper/internal/capstart"
 	"capper/internal/cert"
 	"capper/internal/compute"
+	autoscalestore "capper/internal/autoscale/store"
 	csdstore "capper/internal/csd/store"
+	"capper/internal/topology"
 	"capper/internal/database"
-	capperdns "capper/internal/dns"
-	"capper/internal/eventing"
-	"capper/internal/firewall"
-	"capper/internal/functions"
 	"capper/internal/health"
-	"capper/internal/host"
-	"capper/internal/hostsec/fail2ban"
-	"capper/internal/hoststorage"
-	"capper/internal/iam"
-	"capper/internal/ingress"
-	"capper/internal/ipam"
-	"capper/internal/kms"
 	"capper/internal/lb"
+	"capper/internal/firewall"
+	"capper/internal/host"
+	"capper/internal/iam"
+	"capper/internal/kms"
 	"capper/internal/marketplace"
-	"capper/internal/mcpserver"
+	"capper/internal/billing"
+	"capper/internal/eventing"
+	"capper/internal/ingress"
 	"capper/internal/metadata"
+	"capper/internal/queue"
 	"capper/internal/network"
 	"capper/internal/networking"
-	"capper/internal/org"
 	"capper/internal/posture"
-	"capper/internal/queue"
-	"capper/internal/quotas"
+	"capper/internal/org"
 	"capper/internal/registry"
 	"capper/internal/resource"
-	"capper/internal/resourcemon"
-	caps3 "capper/internal/s3server"
 	"capper/internal/secret"
+	caps3 "capper/internal/s3server"
 	"capper/internal/stack"
-	"capper/internal/storage"
-	"capper/internal/topology"
 	"capper/internal/vpc"
+	"capper/internal/storage"
+	bottlestore "capper/internal/bottle/store"
 	"capper/internal/vpcmover"
+	"capper/internal/audit"
+	"capper/internal/quotas"
+	"capper/internal/resourcemon"
+	"capper/internal/functions"
+	"capper/internal/mcpserver"
+	"capper/internal/ipam"
+	"capper/internal/adminconfig"
+	"capper/internal/hoststorage"
+	"capper/internal/hostsec/fail2ban"
 )
 
 type Store struct {
-	DB                    *sql.DB
-	Paths                 Paths
-	SecretKey             []byte // AES-256 master key for secrets (also used for S3 credential encryption)
-	Resources             *resource.Store
-	Projects              *org.Store
-	IAM                   *iam.Manager
-	Hosts                 *host.Store
-	Networks              *network.Store
-	Networking            *networking.Service
-	Firewalls             *firewall.Store
-	DNS                   *capperdns.Store
-	Compute               *compute.Store
-	Storage               *storage.Store
-	Registry              *registry.Store
-	Events                *EventStore
-	Secrets               *secret.Manager
-	KMS                   *kms.Manager
-	Certs                 *cert.Manager
-	Posture               *posture.Scanner
-	LB                    *lb.Manager
-	Backup                *backup.Manager
-	Health                *health.Store
-	Stack                 *stack.Manager
-	Jobs                  *stack.JobStore
-	Bottles               *bottlestore.Store
-	Databases             *database.Manager
-	AI                    *ai.Manager
-	Marketplace           *marketplace.Manager
-	Metadata              *metadata.Manager
-	Billing               *billing.Manager
-	Queue                 *queue.Manager
-	Ingress               *ingress.Manager
-	Eventing              *eventing.Manager
-	CSD                   *csdstore.Store
-	Autoscale             *autoscalestore.Store
-	Topology              *topology.Manager
-	VPC                   *vpc.Manager
-	VPCMover              *vpcmover.Store
-	Audit                 *audit.Store
-	Quotas                *quotas.Store
-	ResourceMon           *resourcemon.Store
-	Functions             *functions.Store
-	MCPServers            *mcpserver.Store
-	IPAM                  *ipam.Store
-	AdminConfig           *adminconfig.Store
-	HostStorage           *hoststorage.Store
-	Fail2ban              *fail2ban.Store
-	DeletionJobs          *DeletionJobStore
-	CapStartRecipes       *capstart.RecipeStore
-	CapStartExecutions    *capstart.RecipeExecutionStore
-	CapStartISOs          *capstart.ISOStore
-	CapStartInstallations *capstart.InstallationJobStore
+	DB        *sql.DB
+	Paths     Paths
+	SecretKey []byte // AES-256 master key for secrets (also used for S3 credential encryption)
+	Resources *resource.Store
+	Projects  *org.Store
+	IAM       *iam.Manager
+	Hosts     *host.Store
+	Networks    *network.Store
+	Networking  *networking.Service
+	Firewalls   *firewall.Store
+	DNS       *capperdns.Store
+	Compute   *compute.Store
+	Storage   *storage.Store
+	Registry  *registry.Store
+	Events    *EventStore
+	Secrets   *secret.Manager
+	KMS       *kms.Manager
+	Certs     *cert.Manager
+	Posture   *posture.Scanner
+	LB        *lb.Manager
+	Backup    *backup.Manager
+	Health    *health.Store
+	Stack       *stack.Manager
+	Jobs        *stack.JobStore
+	Bottles     *bottlestore.Store
+	Databases   *database.Manager
+	AI          *ai.Manager
+	Marketplace *marketplace.Manager
+	Metadata    *metadata.Manager
+	Billing     *billing.Manager
+	Queue       *queue.Manager
+	Ingress     *ingress.Manager
+	Eventing    *eventing.Manager
+	CSD         *csdstore.Store
+	Autoscale   *autoscalestore.Store
+	Topology    *topology.Manager
+	VPC         *vpc.Manager
+	VPCMover    *vpcmover.Store
+	Audit       *audit.Store
+	Quotas      *quotas.Store
+	ResourceMon *resourcemon.Store
+	Functions   *functions.Store
+	MCPServers  *mcpserver.Store
+	IPAM        *ipam.Store
+	AdminConfig *adminconfig.Store
+	HostStorage *hoststorage.Store
+	Fail2ban    *fail2ban.Store
 }
 
 func Open(paths Paths) (*Store, error) {
@@ -144,27 +138,6 @@ func Open(paths Paths) (*Store, error) {
 	if err := applyMigration(db, "0001_tenancy_columns", tenancyStmts); err != nil {
 		db.Close()
 		return nil, err
-	}
-
-	// Create deletion_jobs table for async resource deletion tracking.
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS deletion_jobs (
-		id TEXT PRIMARY KEY,
-		status TEXT NOT NULL,
-		resource_type TEXT NOT NULL,
-		resource_id TEXT NOT NULL,
-		confirmation_token TEXT,
-		progress INTEGER DEFAULT 0,
-		current_step TEXT,
-		steps TEXT NOT NULL,
-		completed_steps TEXT NOT NULL,
-		errors TEXT NOT NULL,
-		created_at TEXT NOT NULL,
-		started_at TEXT,
-		completed_at TEXT,
-		expires_at TEXT NOT NULL,
-		UNIQUE(id)
-	)`); err != nil {
-		return nil, fmt.Errorf("store: create deletion_jobs table: %w", err)
 	}
 
 	s.Resources = resource.NewStore(db)
@@ -250,15 +223,6 @@ func Open(paths Paths) (*Store, error) {
 	s.AdminConfig = adminconfig.NewStore(db)
 	s.HostStorage = hoststorage.NewStore(db)
 	s.Fail2ban = fail2ban.NewStore(db)
-	s.DeletionJobs = NewDeletionJobStore(db)
-	s.CapStartRecipes = capstart.NewRecipeStore(db)
-	s.CapStartExecutions = capstart.NewRecipeExecutionStore(db)
-	s.CapStartISOs = capstart.NewISOStore(db)
-	s.CapStartInstallations = capstart.NewInstallationJobStore(db)
-	if err := capstart.LoadBuiltinRecipes(s.CapStartRecipes); err != nil {
-		db.Close()
-		return nil, err
-	}
 	return s, nil
 }
 
@@ -406,9 +370,6 @@ func (s *Store) init() error {
 		return err
 	}
 	if err := fail2ban.NewStore(s.DB).InitSchema(); err != nil {
-		return err
-	}
-	if err := capstart.InitSchema(s.DB); err != nil {
 		return err
 	}
 	stmts := []string{

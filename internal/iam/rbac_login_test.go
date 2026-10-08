@@ -13,25 +13,25 @@ func TestResolveSSOUserRejectsUnknown(t *testing.T) {
 	if err := mgr.Bootstrap(); err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
-	if _, err := mgr.ResolveSSOUser("stranger@impenetrix.com"); err == nil {
+	if _, err := mgr.ResolveSSOUser("stranger@example.com"); err == nil {
 		t.Fatalf("unknown SSO email should be rejected")
 	}
 	// Admin provisions the user (no self-service).
-	if _, err := mgr.CreateManagedUser("rick@impenetrix.com", "rick@impenetrix.com", "google"); err != nil {
+	if _, err := mgr.CreateManagedUser("alice@example.com", "alice@example.com", "google"); err != nil {
 		t.Fatalf("CreateManagedUser: %v", err)
 	}
-	u, err := mgr.ResolveSSOUser("rick@impenetrix.com")
+	u, err := mgr.ResolveSSOUser("alice@example.com")
 	if err != nil {
 		t.Fatalf("ResolveSSOUser after provisioning: %v", err)
 	}
-	if u.Email != "rick@impenetrix.com" {
+	if u.Email != "alice@example.com" {
 		t.Fatalf("resolved wrong user: %+v", u)
 	}
 	// Disabled users are denied.
 	if err := mgr.IAMStore().SetUserStatus(u.ID, iam.UserStatusDisabled); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
-	if _, err := mgr.ResolveSSOUser("rick@impenetrix.com"); err == nil {
+	if _, err := mgr.ResolveSSOUser("alice@example.com"); err == nil {
 		t.Fatalf("disabled user should be denied")
 	}
 }
@@ -67,7 +67,7 @@ func TestEnsureAdminUserBootstrap(t *testing.T) {
 	if err := mgr.Bootstrap(); err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
-	u, err := mgr.EnsureAdminUser("admin@impenetrix.com", "google")
+	u, err := mgr.EnsureAdminUser("admin@example.com", "google")
 	if err != nil {
 		t.Fatalf("EnsureAdminUser: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestEnsureAdminUserBootstrap(t *testing.T) {
 		t.Fatalf("bootstrap admin not authorized: %v", dec)
 	}
 	// Idempotent.
-	if _, err := mgr.EnsureAdminUser("admin@impenetrix.com", "google"); err != nil {
+	if _, err := mgr.EnsureAdminUser("admin@example.com", "google"); err != nil {
 		t.Fatalf("EnsureAdminUser repeat: %v", err)
 	}
 }
@@ -90,7 +90,7 @@ func TestMemberRoleEnforcement(t *testing.T) {
 	if err := mgr.Bootstrap(); err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
-	u, err := mgr.CreateManagedUser("member@impenetrix.com", "member@impenetrix.com", "google")
+	u, err := mgr.CreateManagedUser("member@example.com", "member@example.com", "google")
 	if err != nil {
 		t.Fatalf("CreateManagedUser: %v", err)
 	}

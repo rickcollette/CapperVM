@@ -12,7 +12,7 @@ import (
 // migrateLegacyLBs converts single-listener LBs (listen_addr + lb_backends) into
 // default target groups and listeners. Idempotent: skips LBs that already have listeners.
 func migrateLegacyLBs(db *sql.DB) error {
-	rows, err := db.Query(`SELECT ` + lbCols + ` FROM lb_load_balancers`)
+	rows, err := db.Query(`SELECT id, name, project, network_id, subnet_id, vpc_id, scheme, type, vip_address, routable_ip_id, eni_id, dns_name, mode, listen_addr, status, algorithm, selector, tls_cert_name, service_alias, created_at FROM lb_load_balancers`)
 	if err != nil {
 		return err
 	}

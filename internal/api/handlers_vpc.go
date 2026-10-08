@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -140,12 +141,25 @@ func (s *Server) handlePatchVPCUnified(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, err)
 		return
 	}
-	var patch vpc.VPC
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+	var body struct {
+		Name           string            `json:"name"`
+		Description    string            `json:"description"`
+		MobilityPolicy string            `json:"mobilityPolicy"`
+		Labels         map[string]string `json:"labels"`
+		DNSDomain      string            `json:"dnsDomain"`
+		DNSSupport     *bool             `json:"dnsSupport"`
+		DNSHostnames   *bool             `json:"dnsHostnames"`
+		EnableFlowLogs *bool             `json:"enableFlowLogs"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeBadRequest(w, err)
 		return
 	}
-	v, err := s.netSvc().UpdateVPC(s.project, ref, patch)
+	v, err := s.netSvc().UpdateVPC(s.project, ref, networking.VPCPatch{
+		Name: body.Name, Description: body.Description, MobilityPolicy: body.MobilityPolicy,
+		Labels: body.Labels, DNSDomain: body.DNSDomain,
+		DNSSupport: body.DNSSupport, DNSHostnames: body.DNSHostnames, EnableFlowLogs: body.EnableFlowLogs,
+	})
 	if err != nil {
 		writeBadRequest(w, err)
 		return
@@ -232,6 +246,10 @@ func (s *Server) handleListVPCSubnetsUnified(w http.ResponseWriter, r *http.Requ
 	if ref == "" {
 		ref = r.PathValue("vpc")
 	}
+	if err := s.authorize(r, "vpc:get", "vpc/"+ref); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	purpose := r.URL.Query().Get("purpose")
 	var (
 		subs []vpc.Subnet
@@ -258,6 +276,10 @@ func (s *Server) handleCreateVPCSubnetUnified(w http.ResponseWriter, r *http.Req
 	ref := r.PathValue("vpcId")
 	if ref == "" {
 		ref = r.PathValue("vpc")
+	}
+	if err := s.authorize(r, "vpc:update", "vpc/"+ref); err != nil {
+		writeForbidden(w, err)
+		return
 	}
 	v, err := s.netSvc().GetVPC(s.project, ref)
 	if err != nil {
@@ -304,6 +326,10 @@ func (s *Server) handleCreateVPCSubnetUnified(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) handleGetSubnet(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	sub, err := s.ctrl.Store.VPC.GetSubnetByID(r.PathValue("subnetId"))
 	if err != nil {
 		writeNotFound(w, "subnet not found")
@@ -313,12 +339,19 @@ func (s *Server) handleGetSubnet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePatchSubnet(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	sub, err := s.ctrl.Store.VPC.GetSubnetByID(r.PathValue("subnetId"))
 	if err != nil {
 		writeNotFound(w, "subnet not found")
 		return
 	}
-	var patch vpc.Subnet
+	var patch struct {
+		Name               string `json:"name"`
+		AutoAssignPublicIP *bool  `json:"autoAssignPublicIp"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		writeBadRequest(w, err)
 		return
@@ -326,8 +359,8 @@ func (s *Server) handlePatchSubnet(w http.ResponseWriter, r *http.Request) {
 	if patch.Name != "" {
 		sub.Name = patch.Name
 	}
-	if patch.AutoAssignPublicIP {
-		sub.AutoAssignPublicIP = true
+	if patch.AutoAssignPublicIP != nil {
+		sub.AutoAssignPublicIP = *patch.AutoAssignPublicIP
 	}
 	updated, err := s.ctrl.Store.VPC.UpdateSubnet(sub)
 	if err != nil {
@@ -338,6 +371,10 @@ func (s *Server) handlePatchSubnet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSubnet(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	subnetID := r.PathValue("subnetId")
 	if err := s.netSvc().DeleteSubnet(subnetID); err != nil {
 		writeBadRequest(w, err)
@@ -349,6 +386,10 @@ func (s *Server) handleDeleteSubnet(w http.ResponseWriter, r *http.Request) {
 // ---- Route tables -----------------------------------------------------------
 
 func (s *Server) handleListRouteTables(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	ref := r.PathValue("vpcId")
 	if ref == "" {
 		ref = r.PathValue("vpc")
@@ -367,6 +408,10 @@ func (s *Server) handleListRouteTables(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateRouteTable(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	ref := r.PathValue("vpcId")
 	if ref == "" {
 		ref = r.PathValue("vpc")
@@ -392,6 +437,10 @@ func (s *Server) handleCreateRouteTable(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleGetRouteTable(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	rt, err := s.ctrl.Store.VPC.GetRouteTableByID(r.PathValue("routeTableId"))
 	if err != nil {
 		writeNotFound(w, "route table not found")
@@ -402,6 +451,10 @@ func (s *Server) handleGetRouteTable(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAddRoute(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		DestinationCIDR string `json:"destinationCidr"`
 		Destination     string `json:"destination"`
@@ -425,6 +478,10 @@ func (s *Server) handleAddRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	if err := s.ctrl.Store.VPC.DeleteRoute(r.PathValue("routeId")); err != nil {
 		writeBadRequest(w, err)
 		return
@@ -450,6 +507,10 @@ func (s *Server) handleAssociateSubnetRouteTable(w http.ResponseWriter, r *http.
 // ---- Security groups --------------------------------------------------------
 
 func (s *Server) handleListSecurityGroups(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	var sgs []vpc.SecurityGroup
 	var err error
@@ -475,6 +536,10 @@ func (s *Server) handleListSecurityGroups(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleCreateSecurityGroup(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		VPCID       string `json:"vpcId"`
 		Name        string `json:"name"`
@@ -503,6 +568,10 @@ func (s *Server) handleCreateSecurityGroup(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleGetSecurityGroup(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	sgID := r.PathValue("sgId")
 	vpcID := r.URL.Query().Get("vpcId")
 	sg, err := s.ctrl.Store.VPC.GetSecurityGroup(sgID, vpcID)
@@ -515,6 +584,10 @@ func (s *Server) handleGetSecurityGroup(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleDeleteSecurityGroup(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	if err := s.ctrl.Store.VPC.DeleteSecurityGroup(r.PathValue("sgId"), vpcID); err != nil {
 		writeBadRequest(w, err)
@@ -524,6 +597,10 @@ func (s *Server) handleDeleteSecurityGroup(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleAddSGRule(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		Direction string `json:"direction"`
 		Protocol  string `json:"protocol"`
@@ -551,6 +628,10 @@ func (s *Server) handleAddSGRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSGRule(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	if err := s.ctrl.Store.VPC.DeleteSGRule(r.PathValue("ruleId")); err != nil {
 		writeBadRequest(w, err)
 		return
@@ -561,6 +642,10 @@ func (s *Server) handleDeleteSGRule(w http.ResponseWriter, r *http.Request) {
 // ---- Internet gateways ------------------------------------------------------
 
 func (s *Server) handleListIGWs(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	if vpcID == "" {
 		writeData(w, []vpc.InternetGateway{}, nil)
@@ -580,6 +665,10 @@ func (s *Server) handleListIGWs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateIGW(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		VPCID string `json:"vpcId"`
 		Name  string `json:"name"`
@@ -602,6 +691,10 @@ func (s *Server) handleCreateIGW(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteIGW(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	if err := s.ctrl.Store.VPC.DeleteIGW(r.PathValue("igwId"), vpcID); err != nil {
 		writeBadRequest(w, err)
@@ -613,6 +706,10 @@ func (s *Server) handleDeleteIGW(w http.ResponseWriter, r *http.Request) {
 // ---- NAT gateways -----------------------------------------------------------
 
 func (s *Server) handleListNATGateways(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	if vpcID == "" {
 		writeData(w, []vpc.NATGateway{}, nil)
@@ -632,6 +729,10 @@ func (s *Server) handleListNATGateways(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateNATGateway(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		VPCID    string `json:"vpcId"`
 		SubnetID string `json:"subnetId"`
@@ -642,9 +743,26 @@ func (s *Server) handleCreateNATGateway(w http.ResponseWriter, r *http.Request) 
 		writeBadRequest(w, err)
 		return
 	}
+	if req.VPCID == "" {
+		writeBadRequest(w, fmt.Errorf("vpcId is required"))
+		return
+	}
+	if req.SubnetID == "" {
+		writeBadRequest(w, fmt.Errorf("subnetId is required"))
+		return
+	}
 	v, err := s.netSvc().GetVPC(s.project, req.VPCID)
 	if err != nil {
 		writeNotFound(w, "vpc not found")
+		return
+	}
+	sub, serr := s.ctrl.Store.VPC.GetSubnetByID(req.SubnetID)
+	if serr != nil {
+		writeBadRequest(w, fmt.Errorf("subnet not found: %w", serr))
+		return
+	}
+	if sub.VPCID != v.ID {
+		writeBadRequest(w, fmt.Errorf("subnet %s is not in vpc %s", req.SubnetID, v.ID))
 		return
 	}
 	nat, err := s.ctrl.Store.VPC.CreateNATGateway(v.ID, req.SubnetID, req.Name, req.PublicIP)
@@ -656,6 +774,10 @@ func (s *Server) handleCreateNATGateway(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleGetNATGateway(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	nat, err := s.ctrl.Store.VPC.GetNATGateway(r.PathValue("natId"), vpcID)
 	if err != nil {
@@ -666,6 +788,10 @@ func (s *Server) handleGetNATGateway(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteNATGateway(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	if err := s.ctrl.Store.VPC.DeleteNATGateway(r.PathValue("natId"), vpcID); err != nil {
 		writeBadRequest(w, err)
@@ -677,6 +803,10 @@ func (s *Server) handleDeleteNATGateway(w http.ResponseWriter, r *http.Request) 
 // ---- Network ACLs -----------------------------------------------------------
 
 func (s *Server) handleListNetworkACLs(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	if vpcID == "" {
 		writeData(w, []vpc.NetworkACL{}, nil)
@@ -696,6 +826,10 @@ func (s *Server) handleListNetworkACLs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateNetworkACL(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		VPCID string `json:"vpcId"`
 		Name  string `json:"name"`
@@ -718,6 +852,10 @@ func (s *Server) handleCreateNetworkACL(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleGetNetworkACL(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:inspect", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	acl, err := s.ctrl.Store.VPC.GetNetworkACL(r.PathValue("aclId"), vpcID)
 	if err != nil {
@@ -729,6 +867,10 @@ func (s *Server) handleGetNetworkACL(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteNetworkACL(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	vpcID := r.URL.Query().Get("vpcId")
 	if err := s.ctrl.Store.VPC.DeleteNetworkACL(r.PathValue("aclId"), vpcID); err != nil {
 		writeBadRequest(w, err)
@@ -738,6 +880,10 @@ func (s *Server) handleDeleteNetworkACL(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleAddNetworkACLEntry(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	var req struct {
 		RuleNumber int    `json:"ruleNumber"`
 		Direction  string `json:"direction"`
@@ -760,6 +906,10 @@ func (s *Server) handleAddNetworkACLEntry(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleDeleteNetworkACLEntry(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "vpc:update", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	ruleNum, _ := strconv.Atoi(r.PathValue("ruleNumber"))
 	if err := s.ctrl.Store.VPC.DeleteNetworkACLEntry(r.PathValue("aclId"), ruleNum); err != nil {
 		writeBadRequest(w, err)

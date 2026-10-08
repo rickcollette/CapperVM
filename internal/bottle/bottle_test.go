@@ -2,6 +2,7 @@ package bottle_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"capper/internal/bottle"
@@ -23,13 +24,8 @@ func minimalSpec(t *testing.T) []byte {
 				"app.port": {Type: "port", Default: "8080"},
 				"app.name": {Type: "string", Default: "myapp", Required: false},
 			},
-			Resources: bottle.ResourcesSpec{
-				Networks: []bottle.NetworkSpec{
-					{Name: "app-net", Mode: "nat", Subnet: "auto"},
-				},
-			},
 			Services: []bottle.ServiceSpec{
-				{Name: "web", Image: "{{ build.outputImage }}", Replicas: "1", Network: "app-net"},
+				{Name: "web", Image: "{{ build.outputImage }}", Replicas: "1"},
 			},
 			Outputs: map[string]bottle.OutputSpec{
 				"port": {Description: "Listen port", Value: "{{ parameters.app.port }}"},
@@ -73,6 +69,15 @@ func TestValidateSpec_Valid(t *testing.T) {
 	errs := bottle.ValidateSpec(spec, nil)
 	if len(errs) != 0 {
 		t.Errorf("expected no errors, got: %v", errs)
+	}
+}
+
+func TestValidateSpec_RejectsLegacyNetworks(t *testing.T) {
+	spec, _ := bottle.ParseSpec(minimalSpec(t))
+	spec.Spec.Resources.Networks = []bottle.NetworkSpec{{Name: "app-net"}}
+	errs := bottle.ValidateSpec(spec, nil)
+	if len(errs) == 0 || !strings.Contains(errs[0], "VPC subnet placement") {
+		t.Fatalf("expected actionable legacy network validation error, got %v", errs)
 	}
 }
 
@@ -185,9 +190,6 @@ func TestPlan_Basic(t *testing.T) {
 	kinds := make(map[string]int)
 	for _, a := range plan {
 		kinds[a.Kind]++
-	}
-	if kinds["network"] == 0 {
-		t.Error("expected network action in plan")
 	}
 	if kinds["image"] == 0 {
 		t.Error("expected image build action in plan")

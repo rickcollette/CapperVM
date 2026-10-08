@@ -6,7 +6,7 @@ DIST_APP    := $(DIST_DIR)/$(APP)
 RUN_DIR     := capper-run
 ALPINE_CONFIG := examples/alpine/capper.json
 ALPINE_ROOTFS := examples/alpine/rootfs/bin/sh
-CAPPERWEB_DIR := /home/megalith/CapperWeb
+CAPPERWEB_DIR ?= ../CapperWeb
 
 .PHONY: build test clean distclean dist web bootstrap-alpine \
         capper-run capper-run-stop capper-run-status \
@@ -15,13 +15,13 @@ CAPPERWEB_DIR := /home/megalith/CapperWeb
         docs-gen docs-cli docs-api docs-screenshots git-push
 
 # CapDB lives in its own repository (https://github.com/rickcollette/CapDB). It is
-# checked out into ./CapDB (git-ignored) by `make capdb-fetch`, which clones or
-# fast-forwards it from CAPDB_REPO. Override CAPDB_DIR to use a different checkout;
+# checked out into ./CapDB (git-ignored) by `make capdb-fetch`, which clones it
+# and detaches at CAPDB_REF. Override CAPDB_DIR to use a different checkout;
 # CAPDB_BUILD stays inside Capper so the source tree is never written to.
 CAPDB_REPO  ?= https://github.com/rickcollette/CapDB.git
+CAPDB_REF   ?= v3.7.2
 CAPDB_DIR   ?= CapDB
 CAPDB_BUILD ?= build/capdb
-CAPDB_JOBS  ?= $(shell nproc)
 
 # ── Version stamping ──────────────────────────────────────────────────────────
 # Read from the VERSION file; git metadata when available. Override CAPPER_VERSION
@@ -75,24 +75,29 @@ test:
 
 # ── CapDB networked storage backend (external tree at $(CAPDB_DIR)) ────────────
 
-# Build the CapDB client library + server (CMake, requires a C toolchain +
-# OpenSSL). Products land in $(CAPDB_BUILD): libcapdb_client.a, capdb-server.
-# Always runs the (incremental) CMake build so edits to the CapDB sources are
-# picked up; configure only runs the first time.
-# Clone the CapDB repo into CAPDB_DIR (or fast-forward an existing checkout).
+# Build the CapDB client library, server, and shell (CMake, C toolchain, OpenSSL).
+# Products land in $(CAPDB_BUILD): libcapdb_client.a, capdb-server, capdb.
+# CMake is re-run so a CapDB ref change picks up pool, network, store, and
+# replication. The compile itself stays incremental.
+# Clone CapDB into CAPDB_DIR when missing, then detach at CAPDB_REF.
 capdb-fetch:
-	@if [ -d "$(CAPDB_DIR)/.git" ]; then \
-	  echo "Updating CapDB checkout in $(CAPDB_DIR)"; git -C "$(CAPDB_DIR)" pull --ff-only; \
-	else \
+	@if [ ! -d "$(CAPDB_DIR)/.git" ]; then \
 	  echo "Cloning $(CAPDB_REPO) -> $(CAPDB_DIR)"; git clone "$(CAPDB_REPO)" "$(CAPDB_DIR)"; \
 	fi
+	@echo "Checking out CapDB $(CAPDB_REF) in $(CAPDB_DIR)"
+	@git -C "$(CAPDB_DIR)" fetch --tags origin
+	@git -C "$(CAPDB_DIR)" checkout --detach "$(CAPDB_REF)"
 
 capdb:
 	@test -d "$(CAPDB_DIR)/capdb/client" || { \
 	  echo "CapDB source not found at $(CAPDB_DIR); run 'make capdb-fetch' (or set CAPDB_DIR)"; exit 1; }
-	@test -f $(CAPDB_BUILD)/CMakeCache.txt || \
-	  cmake -B $(CAPDB_BUILD) -S $(CAPDB_DIR) -DCAPDB_ENABLE_POOL=ON -DCAPDB_ENABLE_NETWORK=ON
-	cmake --build $(CAPDB_BUILD) -j$(CAPDB_JOBS) --target capdb_client capdb-server capdbtest
+	cmake -B $(CAPDB_BUILD) -S $(CAPDB_DIR) \
+	  -DCMAKE_BUILD_TYPE=Release \
+	  -DCAPDB_ENABLE_POOL=ON \
+	  -DCAPDB_ENABLE_NETWORK=ON \
+	  -DCAPDB_ENABLE_STORE=ON \
+	  -DCAPDB_ENABLE_REPLICATION=ON
+	cmake --build $(CAPDB_BUILD) -j$(shell nproc) --target capdb_client capdb-server capdb_cli capdbtest
 
 capdb-clean:
 	rm -rf $(CAPDB_BUILD)

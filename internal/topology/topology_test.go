@@ -85,6 +85,30 @@ func TestStore_InsertAndGetRealm(t *testing.T) {
 	}
 }
 
+func TestStore_EmptyListsAreArrays(t *testing.T) {
+	s := topology.NewStore(openDB(t))
+	realms, err := s.ListRealms()
+	if err != nil {
+		t.Fatal(err)
+	}
+	regions, err := s.ListRegions("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zones, err := s.ListZones("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := s.ListNodes("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if realms == nil || regions == nil || zones == nil || nodes == nil {
+		t.Fatalf("empty list results must be non-nil slices: realms=%v regions=%v zones=%v nodes=%v",
+			realms, regions, zones, nodes)
+	}
+}
+
 func TestStore_InsertAndGetZone(t *testing.T) {
 	db := openDB(t)
 	s := topology.NewStore(db)

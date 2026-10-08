@@ -9,13 +9,23 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"gopkg.in/yaml.v3"
+	"math/big"
+	"time"
 )
 
 const (
@@ -43,7 +53,7 @@ type Config struct {
 			OutDir  string `yaml:"out_dir"`
 		} `yaml:"web"`
 		PDF struct {
-			Enabled bool `yaml:"enabled"`
+			Enabled bool   `yaml:"enabled"`
 			OutDir  string `yaml:"out_dir"`
 		} `yaml:"pdf"`
 	} `yaml:"outputs"`
@@ -845,14 +855,70 @@ func findExecutable(name string) (string, error) {
 
 // ---- serve command ----------------------------------------------------------
 
+func resolveWebPath(webDir, requestPath string) (string, error) {
+	root, err := filepath.EvalSymlinks(webDir)
+	if err != nil {
+		return "", err
+	}
+	rel := filepath.Clean(filepath.FromSlash(strings.TrimPrefix(requestPath, "/")))
+	if !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("invalid web path")
+	}
+	path, err := filepath.EvalSymlinks(filepath.Join(root, rel))
+	if err != nil {
+		return "", err
+	}
+	insideRoot := func(candidate string) bool {
+		rel, err := filepath.Rel(root, candidate)
+		return err == nil && (rel == "." || filepath.IsLocal(rel))
+	}
+	if !insideRoot(path) {
+		return "", fmt.Errorf("invalid web path")
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if st.IsDir() {
+		path, err = filepath.EvalSymlinks(filepath.Join(path, "index.html"))
+		if err != nil || !insideRoot(path) {
+			return "", fmt.Errorf("web directory has no index")
+		}
+		st, err = os.Stat(path)
+		if err != nil || st.IsDir() {
+			return "", fmt.Errorf("web directory has no index")
+		}
+	}
+	return path, nil
+}
+
 func cmdServe() error {
 	webDir := filepath.Join(distDir, "web")
 	if _, err := os.Stat(webDir); err != nil {
 		return fmt.Errorf("web output not found — run make docs-web first")
 	}
-	addr := ":8888"
-	fmt.Println("docs-serve: serving at http://localhost" + addr)
-	return http.ListenAndServe(addr, http.FileServer(http.Dir(webDir)))
+	addr := "127.0.0.1:8888"
+	// Local docs preview only — loopback bind, no directory listings, TLS with ephemeral cert.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path, err := resolveWebPath(webDir, r.URL.Path)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, path)
+	})
+	cert, err := ephemeralLocalhostCert()
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{
+		Addr:      addr,
+		Handler:   mux,
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
+	}
+	fmt.Println("docs-serve: serving at https://" + addr + " (ephemeral self-signed cert)")
+	return srv.ListenAndServeTLS("", "")
 }
 
 // ---- all command ------------------------------------------------------------
@@ -950,3 +1016,31 @@ func repoRoot() string {
 
 // ensure bufio and scanner are used (imported for future use)
 var _ = bufio.NewScanner
+
+func ephemeralLocalhostCert() (tls.Certificate, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	b, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: b})
+	return tls.X509KeyPair(certPEM, keyPEM)
+}

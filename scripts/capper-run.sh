@@ -3,8 +3,8 @@ set -eu
 
 cmd="${1:-start}"
 
-script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-repo_root="$(CDPATH= cd -- "$script_dir/.." && pwd)"
+script_dir="$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)"
+repo_root="$(CDPATH="" cd -- "$script_dir/.." && pwd)"
 run_dir="${RUN_DIR:-capper-run}"
 case "$run_dir" in
   /*) run_path="$run_dir" ;;

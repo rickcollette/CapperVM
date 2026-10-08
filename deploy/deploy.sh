@@ -20,10 +20,10 @@
 #
 # ── Configuration (env overrides) ─────────────────────────────────────────────
 #   DEPLOY_HOST    SSH host                 (default cloud.cappervm.com)
-#   DEPLOY_USER    SSH user                 (default megalith)
-#   SSH_KEY        SSH private key          (default /home/megalith/.ssh/deploy)
+#   DEPLOY_USER    SSH user                 (default $USER)
+#   SSH_KEY        SSH private key          (default $HOME/.ssh/deploy)
 #   DOMAIN         public TLS domain        (default = DEPLOY_HOST)
-#   ACME_EMAIL     Let's Encrypt contact    (default rcollet@gmail.com)
+#   ACME_EMAIL     Let's Encrypt contact    (required — set env or deploy/local.env)
 #   ACME_STAGING   1 = LE staging (testing) (default 0 = production cert)
 #   BACKEND        capper db backend        (default capdb)
 #   VERSION        release version          (default: auto-bump patch in ./VERSION)
@@ -33,16 +33,23 @@
 set -euo pipefail
 
 # ── Locations ─────────────────────────────────────────────────────────────────
-HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-ROOT="$(CDPATH= cd -- "$HERE/.." && pwd)"
+HERE="$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)"
+ROOT="$(CDPATH="" cd -- "$HERE/.." && pwd)"
 cd "$ROOT"
+
+# ── Local overrides (gitignored) ──────────────────────────────────────────────
+LOCAL_ENV_FILE="${LOCAL_ENV_FILE:-$HERE/local.env}"
+if [ -f "$LOCAL_ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  set -a; . "$LOCAL_ENV_FILE"; set +a
+fi
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 DEPLOY_HOST="${DEPLOY_HOST:-cloud.cappervm.com}"
-DEPLOY_USER="${DEPLOY_USER:-megalith}"
-SSH_KEY="${SSH_KEY:-/home/megalith/.ssh/deploy}"
+DEPLOY_USER="${DEPLOY_USER:-${USER:-}}"
+SSH_KEY="${SSH_KEY:-${HOME}/.ssh/deploy}"
 DOMAIN="${DOMAIN:-$DEPLOY_HOST}"
-ACME_EMAIL="${ACME_EMAIL:-rcollet@gmail.com}"
+ACME_EMAIL="${ACME_EMAIL:-}"
 ACME_STAGING="${ACME_STAGING:-0}"
 BACKEND="${BACKEND:-capdb}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
@@ -65,7 +72,7 @@ if [ -f "$OAUTH_ENV_FILE" ]; then
 fi
 OAUTH2_CLIENT_ID="${OAUTH2_CLIENT_ID:-}"
 OAUTH2_CLIENT_SECRET="${OAUTH2_CLIENT_SECRET:-}"
-ALLOWED_DOMAINS="${ALLOWED_DOMAINS:-impenetrix.com,inipi.org}"
+ALLOWED_DOMAINS="${ALLOWED_DOMAINS:-}"
 # Optional: ensure this email is an active admin on deploy (first administrator;
 # no self-registration). Idempotent if already admin.
 BOOTSTRAP_ADMIN="${BOOTSTRAP_ADMIN:-}"
@@ -83,6 +90,13 @@ else C=''; G=''; R=''; Z=''; fi
 say()  { printf "\n${C}==> %s${Z}\n" "$*"; }
 ok()   { printf "${G}  ✓ %s${Z}\n" "$*"; }
 die()  { printf "${R}  ✗ %s${Z}\n" "$*" >&2; exit 1; }
+
+# Required deploy identity (no personal defaults checked into the repo).
+[ -n "$ACME_EMAIL" ] || die "ACME_EMAIL is required (export ACME_EMAIL=you@example.com)"
+[ -n "$DEPLOY_USER" ] || die "DEPLOY_USER is required (export DEPLOY_USER=…)"
+if [ "$SSO_ENABLED" = "1" ] && [ -z "$ALLOWED_DOMAINS" ]; then
+  die "ALLOWED_DOMAINS is required when OAuth SSO is enabled (comma-separated email domains)"
+fi
 
 # Connection multiplexing: route every ssh/scp through ONE TCP connection so a
 # fail2ban-style jail sees a single login instead of one per step (which can

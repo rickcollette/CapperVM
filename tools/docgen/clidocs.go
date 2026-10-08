@@ -67,10 +67,10 @@ outputs:
 // curatedExamples seeds realistic usage for top-level command groups that don't
 // set cobra's Example field themselves. Keyed by full command path.
 var curatedExamples = map[string]string{
-	"capper run": `capper run web.cap --name web-1 --memory 512M --network app-net \
+	"capper run": `capper run web.cap --name web-1 --memory 512M --subnet-id <subnet-id> \
   --publish 0.0.0.0:8080:8080/tcp --restart on-failure`,
 	"capper compute":  "capper compute group create web --template web-tmpl --desired 3 --min 2 --max 10",
-	"capper network":  "capper network create app-net --mode nat --subnet 10.42.0.0/24 --dns",
+	"capper network":  "capper vpc create prod --cidr 10.0.0.0/16 --home-region local",
 	"capper vpc":      "capper vpc create prod --cidr 10.0.0.0/16 --home-region local",
 	"capper lb":       "capper lb create web-lb --listen 0.0.0.0:8080 --mode http --select tier=web",
 	"capper storage":  "capper storage volume create data --size 20G --class local --encrypted",

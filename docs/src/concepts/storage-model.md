@@ -17,7 +17,8 @@ Capper separates **host storage pools** (physical capacity on the node) from
 
 ## Host storage pools (required)
 
-Before creating instances or block volumes, an admin must register at least one
+Before creating instances, block volumes, CSD volumes, imported/uploaded images,
+or local backups, an admin must register at least one
 **storage pool** and set it as the **default instance pool**:
 
 1. **Admin → Storage** — discover disks, register a pool (`directory` or `lvm` backend).
@@ -44,8 +45,8 @@ Volumes require the default pool to be configured. See
 
 ## Object store (S3-compatible)
 
-Buckets and objects do **not** use host pools — they live under the control-plane
-object store path:
+Buckets and objects are **exempt from storage pools** — they do not use host pools
+and never require a default pool. They live under the control-plane object store path:
 
 ```bash
 capper storage bucket create my-bucket
@@ -55,12 +56,20 @@ capper storage object put my-bucket ./file.txt
 ## CSD shared volumes
 
 CSD provides shared/replicated volumes mountable across nodes (FUSE on the node).
-The control plane runs a CSD server and tracks attachments.
+The control plane runs a CSD server and tracks attachments. Creating a CSD volume
+**requires the default storage pool** and validates the requested size against its
+available capacity.
+
+## Images
+
+Importing (`POST /api/v1/images/import`) or uploading (`POST /api/v1/images/upload`)
+an image **requires the default storage pool**.
 
 ## Backups
 
 `capper backup` manages backups and **backup policies** (scheduled, retained).
-Backups cover platform resources; for the control-plane **database**, see
+Backups (and backup policies) are written to local storage, so creating one
+**requires the default storage pool**. Backups cover platform resources; for the control-plane **database**, see
 [CapDB backup](../operator-guide/capdb-backend.md#operations).
 
 ## Control-plane state vs workload storage

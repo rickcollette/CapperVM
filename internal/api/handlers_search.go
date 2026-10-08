@@ -7,7 +7,7 @@ import (
 
 // handleSearch implements GET /api/v1/search?q=&label=key=val&project=p&type=instances
 //
-// Returns a unified list of matching resources across instances, networks, images,
+// Returns a unified list of matching resources across instances, VPCs, subnets, images,
 // DNS zones, LBs, and stacks. Supports:
 //   - q: substring match on name/ID
 //   - label: key=value label filter (repeatable)
@@ -17,7 +17,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(r.URL.Query().Get("q"))
 	project := r.URL.Query().Get("project")
 	labelParam := r.URL.Query().Get("label") // "key=value"
-	typeFilter := r.URL.Query().Get("type")  // "instances,networks"
+	typeFilter := r.URL.Query().Get("type")  // "instances,vpcs,subnets"
 
 	wantType := map[string]bool{}
 	if typeFilter != "" {
@@ -86,15 +86,33 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Networks
-	if include("networks") {
-		nets, err := s.ctrl.Store.Networks.List(project)
+	// VPCs and subnets (flat networks are removed)
+	if include("vpcs") || include("subnets") || include("networks") {
+		vpcProject := project
+		if vpcProject == "" {
+			vpcProject = s.project
+		}
+		vpcs, err := s.ctrl.Store.VPC.ListVPCs(vpcProject)
 		if err == nil {
-			for _, n := range nets {
-				if !matchName(n.Name) && !matchName(n.ID) {
+			for _, v := range vpcs {
+				if include("vpcs") || include("networks") {
+					if matchName(v.Name) || matchName(v.ID) {
+						results = append(results, result{Type: "vpc", ID: v.ID, Name: v.Name, Project: v.Project})
+					}
+				}
+				if !include("subnets") && !include("networks") {
 					continue
 				}
-				results = append(results, result{Type: "network", ID: n.ID, Name: n.Name, Project: n.Project})
+				subs, serr := s.ctrl.Store.VPC.ListSubnets(v.ID)
+				if serr != nil {
+					continue
+				}
+				for _, sub := range subs {
+					if !matchName(sub.Name) && !matchName(sub.ID) {
+						continue
+					}
+					results = append(results, result{Type: "subnet", ID: sub.ID, Name: sub.Name, Project: v.Project})
+				}
 			}
 		}
 	}

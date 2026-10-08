@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -154,5 +155,52 @@ func TestGet(t *testing.T) {
 	}
 	if got.Name != "get-test" {
 		t.Errorf("name: %q", got.Name)
+	}
+}
+
+func TestValidate_RequiresSubnets(t *testing.T) {
+	cases := []struct {
+		name string
+		tmpl stack.StackTemplate
+		want string
+	}{
+		{"instance without subnet", stack.StackTemplate{Name: "s", Instances: []stack.InstanceSpec{{Name: "web", Image: "x"}}}, "subnetId is required"},
+		{"instance legacy network", stack.StackTemplate{Name: "s", Instances: []stack.InstanceSpec{{Name: "web", Image: "x", Network: "n", SubnetID: "sub"}}}, "network field is removed"},
+		{"networks[] rejected", stack.StackTemplate{Name: "s", Networks: []stack.NetworkSpec{{Name: "n"}}}, "networks[] is removed"},
+		{"lb legacy network", stack.StackTemplate{Name: "s", LBs: []stack.LBSpec{{Name: "lb", Network: "n", SubnetID: "sub"}}}, "network field is removed"},
+		{"lb without subnet", stack.StackTemplate{Name: "s", LBs: []stack.LBSpec{{Name: "lb"}}}, "subnetId is required"},
+	}
+	m := newManager(t)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.tmpl.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate: got %v, want error containing %q", err, tc.want)
+			}
+			if _, err := m.Plan(tc.tmpl, "proj1"); err == nil {
+				t.Error("Plan: expected validation error")
+			}
+			if _, err := m.Apply(context.Background(), tc.tmpl, "proj1"); err == nil {
+				t.Error("Apply: expected validation error")
+			}
+		})
+	}
+}
+
+func TestValidate_OK(t *testing.T) {
+	tmpl := stack.StackTemplate{
+		Name:      "ok",
+		Instances: []stack.InstanceSpec{{Name: "web", Image: "x", SubnetID: "sub-1"}},
+		LBs:       []stack.LBSpec{{Name: "lb", SubnetID: "sub-1"}},
+	}
+	if err := tmpl.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestApply_DNSRequiresSubnet(t *testing.T) {
+	m := newManager(t)
+	tmpl := stack.StackTemplate{Name: "dns-only", DNS: []stack.DNSSpec{{Zone: "z.local", Name: "a", Type: "A", Values: []string{"1.2.3.4"}}}}
+	if _, err := m.Apply(context.Background(), tmpl, "proj1"); err == nil {
+		t.Fatal("expected error: dns records need a subnet")
 	}
 }

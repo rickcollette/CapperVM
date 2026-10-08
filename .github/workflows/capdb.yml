@@ -29,19 +29,20 @@ env:
 
 jobs:
   capdb-integration:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Check out CapDB engine
-        uses: actions/checkout@v7
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           repository: rickcollette/CapDB
+          ref: v3.7.2
           path: CapDB
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.25'
+          go-version: '1.26.6'
 
       - name: Install C toolchain + OpenSSL
         run: |
@@ -58,14 +59,15 @@ jobs:
         run: CGO_ENABLED=0 go build ./...
 
   capdb-sanitizers:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Check out CapDB engine
-        uses: actions/checkout@v7
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           repository: rickcollette/CapDB
+          ref: v3.7.2
           path: CapDB
 
       - name: Install C toolchain + OpenSSL
@@ -98,5 +100,9 @@ jobs:
           UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0 \
             cmake --build build/capdb -j"$(nproc)"
           export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
-          ctest --test-dir build/capdb --output-on-failure || \
-            ctest --test-dir build/capdb -V
+          # The JVM cannot load an ASan-instrumented library without preloading
+          # ASan, and the release smoke test inherits sanitizer flags and times out.
+          ctest --test-dir build/capdb --output-on-failure \
+            -E 'java_jni_runtime_load_run|capdb_release_artifact_smoke' || \
+            ctest --test-dir build/capdb -V \
+              -E 'java_jni_runtime_load_run|capdb_release_artifact_smoke'

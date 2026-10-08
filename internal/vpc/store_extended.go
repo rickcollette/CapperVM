@@ -114,9 +114,10 @@ func (s *Store) UpdateVPC(v VPC) error {
 	}
 	_, err := s.db.Exec(
 		`UPDATE capvpc_vpcs SET name=?, description=?, status=?, mobility_policy=?, labels_json=?, dns_domain=?,
-		 dns_support=?, dns_hostnames=?, enable_flow_logs=?, updated_at=? WHERE id=?`,
+		 dns_support=?, dns_hostnames=?, default_sg_id=?, default_acl_id=?, main_rt_id=?, enable_flow_logs=?, updated_at=? WHERE id=?`,
 		v.Name, v.Description, v.Status, v.MobilityPolicy, string(labels), v.DNSDomain,
-		dnsSupport, dnsHostnames, flowLogs, v.UpdatedAt, v.ID,
+		dnsSupport, dnsHostnames, v.DefaultSecurityGroupID, v.DefaultNetworkACLID, v.MainRouteTableID,
+		flowLogs, v.UpdatedAt, v.ID,
 	)
 	return err
 }
@@ -207,6 +208,19 @@ func (s *Store) DeleteNetworkACLEntry(aclID string, ruleNumber int) error {
 }
 
 func (s *Store) AssociateSubnetNetworkACL(subnetID, aclID string) error {
-	_, err := s.db.Exec(`INSERT OR REPLACE INTO capvpc_subnet_acl_assoc (subnet_id, network_acl_id) VALUES (?, ?)`, subnetID, aclID)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`DELETE FROM capvpc_subnet_acl_assoc WHERE subnet_id=?`, subnetID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO capvpc_subnet_acl_assoc (subnet_id, network_acl_id) VALUES (?, ?)`, subnetID, aclID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE capvpc_subnets SET network_acl_id=? WHERE id=?`, aclID, subnetID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

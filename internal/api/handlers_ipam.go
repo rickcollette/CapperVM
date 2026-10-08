@@ -160,17 +160,29 @@ func (s *Server) handleGetIP(w http.ResponseWriter, r *http.Request) {
 	writeData(w, map[string]any{"ip": ip, "bindings": bindings}, nil)
 }
 
+// pathIPAllocationID resolves an IP allocation id from /ips/{id} or /public-ips/{allocationId|associationId}.
+func pathIPAllocationID(r *http.Request) string {
+	if id := r.PathValue("id"); id != "" {
+		return id
+	}
+	if id := r.PathValue("allocationId"); id != "" {
+		return id
+	}
+	return r.PathValue("associationId")
+}
+
 // POST /api/v1/ips/{id}/release
 func (s *Server) handleReleaseIP(w http.ResponseWriter, r *http.Request) {
 	if err := s.authorize(r, "ip:release", "project:"+s.project); err != nil {
 		writeForbidden(w, err)
 		return
 	}
-	if err := s.ipamManager().Release(r.PathValue("id")); err != nil {
+	id := pathIPAllocationID(r)
+	if err := s.ipamManager().Release(id); err != nil {
 		writeInternal(w, err)
 		return
 	}
-	writeData(w, map[string]any{"released": r.PathValue("id")}, nil)
+	writeData(w, map[string]any{"released": id}, nil)
 }
 
 // POST /api/v1/ips/{id}/attach
@@ -188,7 +200,7 @@ func (s *Server) handleAttachIP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "targetType, targetId, and bindingMode are required")
 		return
 	}
-	binding, err := s.ipamManager().Attach(r.PathValue("id"), b)
+	binding, err := s.ipamManager().Attach(pathIPAllocationID(r), b)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -202,11 +214,24 @@ func (s *Server) handleDetachIP(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, err)
 		return
 	}
-	if err := s.ipamManager().Detach(r.PathValue("id")); err != nil {
+	if associationID := r.PathValue("associationId"); associationID != "" {
+		if _, err := s.ipamStore().GetBinding(associationID); err != nil {
+			writeNotFound(w, "association not found")
+			return
+		}
+		if err := s.ipamManager().DetachBinding(associationID); err != nil {
+			writeInternal(w, err)
+			return
+		}
+		writeData(w, map[string]any{"detached": associationID}, nil)
+		return
+	}
+	id := pathIPAllocationID(r)
+	if err := s.ipamManager().Detach(id); err != nil {
 		writeInternal(w, err)
 		return
 	}
-	writeData(w, map[string]any{"detached": r.PathValue("id")}, nil)
+	writeData(w, map[string]any{"detached": id}, nil)
 }
 
 // ---- exclusions (admin only) -----------------------------------------------

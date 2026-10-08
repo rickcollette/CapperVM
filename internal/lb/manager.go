@@ -43,12 +43,12 @@ func NewManager(s *Store) *Manager {
 	return &Manager{store: s, running: make(map[string]runningEntry)}
 }
 
-func (m *Manager) SetCertResolver(fn CertResolver) { m.certRes = fn }
+func (m *Manager) SetCertResolver(fn CertResolver)                 { m.certRes = fn }
 func (m *Manager) SetACMEChallengeHandler(fn ACMEChallengeHandler) { m.acmeHandler = fn }
-func (m *Manager) SetLogDir(dir string)                          { m.logDir = dir }
-func (m *Manager) SetInstanceLister(fn InstanceLister)           { m.instList = fn }
-func (m *Manager) SetNodeHealthChecker(fn NodeHealthChecker)     { m.nodeHealthy = fn }
-func (m *Manager) Store() *Store                                 { return m.store }
+func (m *Manager) SetLogDir(dir string)                            { m.logDir = dir }
+func (m *Manager) SetInstanceLister(fn InstanceLister)             { m.instList = fn }
+func (m *Manager) SetNodeHealthChecker(fn NodeHealthChecker)       { m.nodeHealthy = fn }
+func (m *Manager) Store() *Store                                   { return m.store }
 
 type DNSAliasCreator func(zoneID, alias, target string) error
 
@@ -249,7 +249,11 @@ func (m *Manager) SetListenerCertificate(lbName, project, listenerID, certID str
 	if err := m.store.SetListenerCertificate(listenerID, certID); err != nil {
 		return err
 	}
+	// Stop then reconcile so HTTPS picks up the new cert immediately.
 	m.stopProxy(listenerID)
+	if err := m.Reconcile(context.Background()); err != nil {
+		return fmt.Errorf("lb: certificate saved but proxy reconcile failed: %w", err)
+	}
 	_ = lb
 	return nil
 }
@@ -299,13 +303,19 @@ func (m *Manager) DeleteTargetGroup(lbName, project, tgID string) error {
 	if err != nil {
 		return err
 	}
-	if tg.LoadBalancerID != "" && tg.LoadBalancerID != lb.ID {
+	if tg.LoadBalancerID != lb.ID {
 		return fmt.Errorf("target group does not belong to this load balancer")
 	}
-	listeners, _ := m.store.ListListeners(lb.ID)
+	listeners, err := m.store.ListListeners(lb.ID)
+	if err != nil {
+		return err
+	}
 	for _, lst := range listeners {
 		if lst.TargetGroupID == tgID {
 			m.stopProxy(lst.ID)
+			if err := m.store.DeleteListener(lst.ID); err != nil {
+				return fmt.Errorf("lb: delete listener %s: %w", lst.ID, err)
+			}
 		}
 	}
 	return m.store.DeleteTargetGroup(tgID)
@@ -336,7 +346,7 @@ func (m *Manager) AddTarget(lbName, project, tgID, address string) (Target, erro
 	if err != nil {
 		return Target{}, err
 	}
-	if tg.LoadBalancerID != "" && tg.LoadBalancerID != lb.ID {
+	if tg.LoadBalancerID != lb.ID {
 		return Target{}, fmt.Errorf("target group does not belong to this load balancer")
 	}
 	t, err := m.store.AddTarget(tgID, address, 1)

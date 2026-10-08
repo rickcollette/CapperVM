@@ -16,6 +16,12 @@ DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" docker build \
   -f packaging/Dockerfile.release \
   -t "$builder" .
 
+CAPPERWEB_HOST="${CAPPERWEB_HOST:-$ROOT/../CapperWeb}"
+if [ ! -d "$CAPPERWEB_HOST" ]; then
+  echo "error: CapperWeb not found at $CAPPERWEB_HOST (set CAPPERWEB_HOST)" >&2
+  exit 1
+fi
+
 docker run --rm \
   --privileged \
   --cgroupns=host \
@@ -27,7 +33,7 @@ docker run --rm \
   -e "SKIP_TESTS=${SKIP_TESTS:-0}" \
   -e "SKIP_IMAGE=${SKIP_IMAGE:-0}" \
   -v "$ROOT:/src" \
-  -v "/home/megalith/CapperVM/CapperWeb:/src/.release/CapperWeb-src:ro" \
+  -v "$CAPPERWEB_HOST:/src/.release/CapperWeb-src:ro" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   "$builder"
 

@@ -4,7 +4,7 @@
 # Prints the new version and writes it to VERSION.
 set -euo pipefail
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+ROOT="$(CDPATH="" cd -- "$(dirname -- "$0")/.." && pwd)"
 VER_FILE="$ROOT/VERSION"
 KIND="${1:-patch}"
 

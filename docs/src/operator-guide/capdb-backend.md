@@ -3,7 +3,7 @@ title: "CapDB networked storage backend"
 description: "Run Capper's control-plane database as a networked, pooled CapDB service."
 owner: "docs"
 status: "stable"
-reviewed: "2026-06-12"
+reviewed: "2026-10-08"
 outputs:
   - markdown
   - web
@@ -17,8 +17,11 @@ database via the pure-Go `modernc.org/sqlite` driver — no external process, id
 for single-node and hermetic tests. For deployments that need a **networked,
 connection-pooled** database without leaving the SQLite SQL dialect, Capper can
 instead talk to **CapDB**, a hard fork of SQLite that adds a TLS client/server
-protocol and a native connection pool. CapDB is vendored in the repo under
-`capdb/`.
+protocol, a native connection pool, a volume store, and WAL replication
+primitives. Capper pins **CapDB 3.7.2**. The sources are not in this
+repository: `make capdb-fetch` clones
+[rickcollette/CapDB](https://github.com/rickcollette/CapDB) into `./CapDB`
+and detaches at `CAPDB_REF` (default `v3.7.2`).
 
 The CapDB backend is **opt-in** and requires a binary built with the `capdb`
 build tag (it links a cgo client library). The default build remains pure-Go.
@@ -39,8 +42,8 @@ The networked driver needs a C toolchain and OpenSSL. Build the CapDB client
 library and server, then build Capper with the `capdb` tag:
 
 ```bash
-make capdb-fetch                 # clone/update the CapDB engine (first run only)
-make capdb                       # builds build/capdb/libcapdb_client.a + capdb-server
+make capdb-fetch                 # clone CapDB and detach at CAPDB_REF (v3.7.2)
+make capdb                       # build/capdb: libcapdb_client.a, capdb-server, capdb
 go build -tags capdb ./cmd/capper
 ```
 
@@ -51,7 +54,7 @@ go build -tags capdb ./cmd/capper
 printf 'super-secret-token\n' > /etc/capper/capdb.auth
 chmod 600 /etc/capper/capdb.auth
 
-capdb/build/capdb-server \
+build/capdb/capdb-server \
   --listen 0.0.0.0:5432 \
   --auth-file /etc/capper/capdb.auth \
   --db-root /var/lib/capper/db \
@@ -159,9 +162,14 @@ capdb://[user@]host[:port]/dbname?token=…&password=…&ca=…&insecure=1
 ```
 
 - `token=` → token auth; `user@…&password=` → username/password auth.
+- `token_file=` → read the token from a file instead of placing it in the DSN.
+  `CAPPER_DB_TOKEN_FILE` does the same on the Capper side and injects `token=`
+  only in memory.
 - `ca=` → CA bundle to verify the server certificate (TLS).
-- `insecure=1` → plain TCP, development only.
-- Default port is `5432`.
+- `insecure=1` → plain TCP, development only. CapDB 3.7 refuses to start TLS
+  unless both `--cert` and `--key` are set.
+- Default port is `5432`. `--listen` also accepts `[IPv6]:port` and an absolute
+  Unix socket path (mode `0600`).
 
 On startup Capper pings the server and fails fast with a clear error if it is
 unreachable. If you set `CAPPER_DB_DRIVER=capdb` on a binary built **without**
@@ -276,11 +284,14 @@ backend; no migration tooling change is needed.
 
 ### Availability posture
 
-This is a **single `capdb-server`** today — a single point of failure, like the
-embedded SQLite it replaces, but now reachable by multiple Capper processes.
-Run it close to the control plane, back it up, and let systemd restart it
-(`Restart=on-failure`). Replicated/HA CapDB (the remote-VFS and RBU primitives
-exist for it) is a future step.
+Capper's supported posture is still **one `capdb-server`** on `--db-root` — a
+single point of failure, like the embedded SQLite it replaces, but reachable by
+multiple Capper processes. Run it close to the control plane, back it up with
+the `capdb` shell, and let systemd restart it (`Restart=on-failure`).
+
+CapDB 3.7 can also run a volume store with WAL replication (`--storage volume`).
+Capper does not configure that mode. Failover stays an operator action. See
+[ADR 0001](../architecture/adr-0001-capdb-availability.md).
 
 ## Verify
 

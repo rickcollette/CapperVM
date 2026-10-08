@@ -9,7 +9,9 @@ import (
 	"capper/internal/firewall"
 	"capper/internal/lb"
 	"capper/internal/manager"
+	"capper/internal/networking"
 	"capper/internal/stack"
+	"capper/internal/storagepolicy"
 )
 
 // ============================================================
@@ -139,16 +141,17 @@ func (s *Server) handleRemoveLBBackend(w http.ResponseWriter, r *http.Request) {
 type firewallView struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
-	Network    string `json:"network"`
+	Network    string `json:"network"` // VPC subnet ID (or legacy ID for pre-existing rows)
 	RulesCount int    `json:"rulesCount"`
 	Status     string `json:"status"`
 }
 
 func toFirewallView(fw firewall.Firewall) firewallView {
 	return firewallView{
-		ID:     fw.NetworkID,
-		Name:   fw.NetworkName,
-		Status: fw.Status,
+		ID:      fw.NetworkID,
+		Name:    fw.NetworkName,
+		Network: fw.NetworkID,
+		Status:  fw.Status,
 	}
 }
 
@@ -176,7 +179,8 @@ func (s *Server) handleCreateFirewall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name    string `json:"name"`
+		Name string `json:"name"`
+		// Network must be a VPC subnet ID when set (flat network names are removed).
 		Network string `json:"network"`
 		Mode    string `json:"mode,omitempty"`
 	}
@@ -184,11 +188,25 @@ func (s *Server) handleCreateFirewall(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err)
 		return
 	}
+	if req.Network != "" {
+		if _, err := s.ctrl.Store.VPC.GetSubnetByID(req.Network); err != nil {
+			writeBadRequest(w, fmt.Errorf("network must be a vpc subnet id"))
+			return
+		}
+	}
 	if req.Name == "" {
 		req.Name = req.Network
 	}
+	if req.Name == "" {
+		writeBadRequest(w, fmt.Errorf("name or network (subnet id) is required"))
+		return
+	}
+	fwID := req.Network
+	if fwID == "" {
+		fwID = req.Name
+	}
 	fwMgr := firewall.NewManager(s.ctrl.Store.Firewalls)
-	fw, err := fwMgr.Init(req.Name, req.Name, req.Mode)
+	fw, err := fwMgr.Init(fwID, req.Name, req.Mode)
 	if err != nil {
 		writeBadRequest(w, err)
 		return
@@ -358,13 +376,20 @@ func (s *Server) handleCreateStack(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err)
 		return
 	}
-	if len(tmpl.Networks) > 0 {
-		writeBadRequest(w, fmt.Errorf("stack networks[] is removed; use VPC subnets and set subnetId on instances"))
+	if err := tmpl.Validate(); err != nil {
+		writeBadRequest(w, err)
 		return
 	}
+	// Verify every referenced subnet exists (and, when given, belongs to its VPC).
 	for _, inst := range tmpl.Instances {
-		if inst.Network != "" {
-			writeBadRequest(w, fmt.Errorf("instance %q: network field is removed; use subnetId", inst.Name))
+		if err := s.checkSubnetInVPC(inst.SubnetID, inst.VPCID); err != nil {
+			writeBadRequest(w, fmt.Errorf("instance %q: subnet: %w", inst.Name, err))
+			return
+		}
+	}
+	for _, l := range tmpl.LBs {
+		if err := s.checkSubnetInVPC(l.SubnetID, l.VPCID); err != nil {
+			writeBadRequest(w, fmt.Errorf("load balancer %q: subnet: %w", l.Name, err))
 			return
 		}
 	}
@@ -374,6 +399,19 @@ func (s *Server) handleCreateStack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, Envelope{Data: result})
+}
+
+// checkSubnetInVPC verifies the subnet exists and, when vpcID is set, belongs to
+// that VPC. Unlike networking.ResolveSubnetForLaunch it has no dataplane side effects.
+func (s *Server) checkSubnetInVPC(subnetID, vpcID string) error {
+	sub, err := s.ctrl.Store.VPC.GetSubnetByID(subnetID)
+	if err != nil {
+		return fmt.Errorf("subnet not found: %w", err)
+	}
+	if vpcID != "" && sub.VPCID != vpcID {
+		return fmt.Errorf("subnet %s is not in vpc %s", subnetID, vpcID)
+	}
+	return nil
 }
 
 func (s *Server) handleGetStack(w http.ResponseWriter, r *http.Request) {
@@ -439,6 +477,11 @@ func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, err)
 		return
 	}
+	// Backups are written to local storage, which requires a default storage pool.
+	if _, err := storagepolicy.RequireDefaultPool(s.ctrl.Store.AdminConfig, s.ctrl.Store.HostStorage); err != nil {
+		writeBadRequest(w, err)
+		return
+	}
 	var req struct {
 		DestDir string `json:"destDir,omitempty"`
 	}
@@ -492,6 +535,11 @@ func (s *Server) handleCreateBackupPolicy(w http.ResponseWriter, r *http.Request
 		writeBadRequest(w, err)
 		return
 	}
+	// Policy targets are local paths (or the default local backup dir); require a pool.
+	if _, err := storagepolicy.RequireDefaultPool(s.ctrl.Store.AdminConfig, s.ctrl.Store.HostStorage); err != nil {
+		writeBadRequest(w, err)
+		return
+	}
 	policy, err := s.ctrl.Store.Backup.CreatePolicy(req.Name, s.project, req.TargetPath, backup.BackupTypeStore, req.IntervalSecs, req.Retention)
 	if err != nil {
 		writeBadRequest(w, err)
@@ -539,20 +587,55 @@ func (s *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 		Name      string `json:"name"`
 		Engine    string `json:"engine"`
 		Version   string `json:"version,omitempty"`
-		NetworkID string `json:"networkId,omitempty"`
+		VPCID     string `json:"vpcId,omitempty"`
+		SubnetID  string `json:"subnetId,omitempty"`
+		NetworkID string `json:"networkId,omitempty"` // legacy alias for subnetId
 		Port      int    `json:"port,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeBadRequest(w, err)
 		return
 	}
+	if req.SubnetID == "" {
+		req.SubnetID = req.NetworkID
+	}
+	if req.SubnetID == "" {
+		writeBadRequest(w, fmt.Errorf("subnetId is required"))
+		return
+	}
+	sub, serr := networking.ResolveSubnetForLaunch(s.ctrl.Store.VPC, req.SubnetID, req.VPCID)
+	if serr != nil {
+		writeBadRequest(w, fmt.Errorf("subnet: %w", serr))
+		return
+	}
+	eni, eerr := s.ctrl.Store.VPC.CreateENI(sub.VPCID, sub.ID, nil, "")
+	if eerr != nil {
+		writeBadRequest(w, fmt.Errorf("eni: %w", eerr))
+		return
+	}
+	netOpts := &manager.NetworkRunOpts{
+		NetworkID:   sub.ID,
+		Bridge:      sub.BridgeName,
+		Subnet:      sub.CIDR,
+		Gateway:     sub.GatewayIP,
+		PreferredIP: eni.PrimaryPrivateIP,
+	}
 	db, err := manager.CreateManagedDatabase(
 		s.ctrl.Store, s.ctrl.Instances, s.ctrl.Store.Metadata,
-		req.Name, s.project, req.Engine, req.Version, req.NetworkID, req.Port,
+		req.Name, s.project, req.Engine, req.Version, sub.ID, req.Port, netOpts,
 	)
 	if err != nil {
+		_ = s.ctrl.Store.VPC.DeleteENI(eni.ID)
 		writeBadRequest(w, err)
 		return
+	}
+	if db.InstanceID != "" {
+		if _, aerr := s.ctrl.Store.VPC.AttachENI(eni.ID, db.InstanceID, 0); aerr != nil {
+			_ = s.ctrl.Store.VPC.DeleteENI(eni.ID)
+			_, _ = manager.DeleteManagedDatabase(s.ctrl.Store, s.ctrl.Instances, db.Name, s.project)
+			writeBadRequest(w, fmt.Errorf("eni attach: %w", aerr))
+			return
+		}
 	}
 	s.recordEvent(r, "database", db.ID, "database.created", map[string]any{"engine": db.Engine, "instanceId": db.InstanceID})
 	writeJSON(w, http.StatusCreated, Envelope{Data: db})

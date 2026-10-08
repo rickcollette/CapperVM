@@ -202,6 +202,34 @@ func (m *Manager) Detach(ipID string) error {
 	return m.store.UpdateIP(ip)
 }
 
+// DetachBinding removes one association and keeps the address attached while
+// any other bindings remain.
+func (m *Manager) DetachBinding(bindingID string) error {
+	binding, err := m.store.GetBinding(bindingID)
+	if err != nil {
+		return err
+	}
+	if err := m.store.DeleteBinding(bindingID); err != nil {
+		return err
+	}
+	bindings, err := m.store.ListBindings(binding.IPID)
+	if err != nil {
+		return err
+	}
+	ip, err := m.store.GetIP(binding.IPID)
+	if err != nil {
+		return err
+	}
+	if len(bindings) == 0 {
+		ip.Status = IPReserved
+		ip.TargetType, ip.TargetID = "", ""
+	} else {
+		ip.Status = IPAttached
+		ip.TargetType, ip.TargetID = bindings[0].TargetType, bindings[0].TargetID
+	}
+	return m.store.UpdateIP(ip)
+}
+
 // ---- exclusions ------------------------------------------------------------
 
 // ListExclusions returns admin-managed exclusions, optionally scoped to a pool

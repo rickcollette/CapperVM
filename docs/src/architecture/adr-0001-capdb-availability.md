@@ -3,7 +3,7 @@ title: "ADR 0001: CapDB availability posture"
 description: "The chosen availability/SLA posture for the CapDB control-plane backend, and the HA roadmap."
 owner: "docs"
 status: "stable"
-reviewed: "2026-06-16"
+reviewed: "2026-10-08"
 outputs:
   - markdown
   - web
@@ -69,8 +69,11 @@ single node" to "highly available."
 ## Follow-ups
 
 - Automated online `.backup` (command + systemd timer) with a tested restore.
+  The AIO bundle ships the `capdb` shell for this.
 - Server-side auth/connection audit log (`S3`).
-- Active/standby or read replicas if the SLA target tightens.
+- CapDB 3.7.2 includes a volume store and WAL replication. Capper still does
+  not configure that mode. Active/standby stays an operator procedure until
+  the SLA target tightens.
 
 ## Related
 
