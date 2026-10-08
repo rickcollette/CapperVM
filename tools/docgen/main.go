@@ -868,10 +868,17 @@ func cmdServe() error {
 			http.NotFound(w, r)
 			return
 		}
-		st, err := os.Stat(path)
-		if err != nil || st.IsDir() {
+st, err := os.Stat(path)
+		if err != nil {
 			http.NotFound(w, r)
 			return
+		}
+		if st.IsDir() {
+			path = filepath.Join(path, "index.html")
+			if _, err := os.Stat(path); err != nil {
+				http.NotFound(w, r)
+				return
+			}
 		}
 		http.ServeFile(w, r, path)
 	})
