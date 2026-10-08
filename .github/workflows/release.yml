@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   matrix-aio:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -39,10 +39,10 @@ jobs:
             suffix: ubuntu18.04-glibc2.27-x86_64
     steps:
       - name: Checkout Capper
-        uses: actions/checkout@v4
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Checkout CapperWeb
-        uses: actions/checkout@v4
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           repository: rickcollette/CapperWeb
           path: CapperWeb
@@ -75,7 +75,7 @@ jobs:
             "${{ matrix.suffix }}"
 
       - name: Upload platform artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: aio-${{ matrix.target }}
           path: |
@@ -96,10 +96,10 @@ jobs:
   publish:
     needs: matrix-aio
     if: ${{ always() && !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Capper
-        uses: actions/checkout@v4
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Resolve version
         id: ver
@@ -115,7 +115,7 @@ jobs:
           echo "version=$BASE" >> "$GITHUB_OUTPUT"
 
       - name: Download all platform artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           path: DIST/AIO
           pattern: aio-*
@@ -150,7 +150,7 @@ jobs:
           TAG: ${{ steps.ver.outputs.tag }}
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: CapperVM ${{ steps.ver.outputs.version }}
