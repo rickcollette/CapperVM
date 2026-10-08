@@ -52,8 +52,11 @@ func DeleteManagedDatabase(st *store.Store, im InstanceManager, nameOrID, projec
 		return database.ManagedDB{}, err
 	}
 	if db.InstanceID != "" {
-		if _, _, stopErr := im.Stop(db.InstanceID, 5*time.Second, true); stopErr == nil {
-			_ = im.Remove(db.InstanceID)
+if _, _, stopErr := im.Stop(db.InstanceID, 5*time.Second, true); stopErr != nil {
+			return database.ManagedDB{}, fmt.Errorf("cannot stop backing instance %s: %w", db.InstanceID, stopErr)
+		}
+		if removeErr := im.Remove(db.InstanceID); removeErr != nil {
+			return database.ManagedDB{}, fmt.Errorf("cannot remove backing instance %s: %w", db.InstanceID, removeErr)
 		}
 	}
 	if db.SecretName != "" {
