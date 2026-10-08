@@ -244,7 +244,7 @@ func (s *Store) DeleteVPC(nameOrID, project string) error {
 			{`DELETE FROM capvpc_internet_gateways WHERE vpc_id=?`, []any{id}},
 			{`DELETE FROM capvpc_endpoints WHERE vpc_id=?`, []any{id}},
 			{`DELETE FROM capvpc_peerings WHERE requester_vpc_id=? OR accepter_vpc_id=?`, []any{id, id}},
-			{`DELETE FROM capvpc_flow_logs WHERE resource_id=?`, []any{id}},
+{`DELETE FROM capvpc_flow_logs WHERE resource_id=? OR resource_id IN (SELECT id FROM capvpc_subnets WHERE vpc_id=?)`, []any{id, id}}
 			{`DELETE FROM capvpc_subnets WHERE vpc_id=?`, []any{id}},
 		}
 		for _, st := range stmts {
