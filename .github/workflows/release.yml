@@ -15,13 +15,38 @@ permissions:
   contents: write
 
 jobs:
-  publish:
+  aio-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
-      - name: Checkout
+      - name: Checkout Capper
         uses: actions/checkout@v4
 
-      - name: Resolve tag
+      - name: Checkout CapperWeb
+        uses: actions/checkout@v4
+        with:
+          repository: rickcollette/CapperWeb
+          path: CapperWeb
+          ref: feat/sso-rbac-dual-auth
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: CapperWeb/package-lock.json
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libssl-dev zlib1g-dev \
+            bubblewrap uidmap qemu-utils genisoimage
+
+      - name: Resolve version
         id: ver
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -29,17 +54,32 @@ jobs:
           else
             TAG="${GITHUB_REF_NAME}"
           fi
+          VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$VERSION" > VERSION
 
-      - name: Create GitHub Release
+      - name: Build AIO bundle
+        env:
+          BUMP_VERSION: "0"
+          SKIP_TESTS: "1"
+          CAPPERWEB_DIR: ${{ github.workspace }}/CapperWeb
+        run: scripts/build-aio.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: CapperVM ${{ steps.ver.outputs.version }}
           body: |
-            CapperVM ${{ steps.ver.outputs.version }}
+            CapperVM ${{ steps.ver.outputs.version }} AIO release (linux-amd64).
 
-            Local AIO artifacts were built for linux-amd64. Re-run with assets in a follow-up if needed.
-          draft: false
-          generate_release_notes: true
+            Artifacts:
+            - `capper-aio-${{ steps.ver.outputs.version }}-linux-amd64.tgz`
+            - `capper-aio-${{ steps.ver.outputs.version }}-linux-amd64.tgz.sha256`
+            - `channels.json`
+          files: |
+            DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-linux-amd64.tgz
+            DIST/AIO/capper-aio-${{ steps.ver.outputs.version }}-linux-amd64.tgz.sha256
+            DIST/AIO/channels.json
+          fail_on_unmatched_files: true
