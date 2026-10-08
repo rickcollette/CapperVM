@@ -344,6 +344,10 @@ func (e *missingParamError) Error() string { return e.field + " is required" }
 var _ = lb.TargetGroup{}
 
 func (s *Server) handleListLaunchTemplateVersions(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorize(r, "launch-template:list", "project:"+s.project); err != nil {
+		writeForbidden(w, err)
+		return
+	}
 	if _, err := s.ctrl.Store.VPC.GetLaunchTemplate(s.project, r.PathValue("templateId")); err != nil {
 		writeNotFound(w, "launch template not found")
 		return

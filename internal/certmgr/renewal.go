@@ -2,8 +2,8 @@ package certmgr
 
 import (
 	"context"
-	"log"
 	"crypto/rand"
+	"log"
 	"math/big"
 	"time"
 )
@@ -47,8 +47,12 @@ func (s *RenewalScheduler) runRenewalSweep(ctx context.Context) {
 		jitterMax = 30 * time.Minute
 	}
 	for _, cert := range certs {
-		n, _ := rand.Int(rand.Reader, big.NewInt(int64(jitterMax)))
-		jitter := time.Duration(n.Int64())
+		jitter := jitterMax / 2
+		if n, err := rand.Int(rand.Reader, big.NewInt(int64(jitterMax))); err != nil {
+			log.Printf("certmgr renewal: jitter entropy unavailable, using %s: %v", jitter, err)
+		} else {
+			jitter = time.Duration(n.Int64())
+		}
 		select {
 		case <-ctx.Done():
 			return

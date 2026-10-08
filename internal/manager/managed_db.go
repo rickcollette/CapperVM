@@ -63,7 +63,9 @@ func DeleteManagedDatabase(st *store.Store, im InstanceManager, nameOrID, projec
 		}
 	}
 	if db.SecretName != "" {
-		_ = st.Secrets.Delete(db.SecretName, project)
+		if secretErr := st.Secrets.Delete(db.SecretName, project); secretErr != nil {
+			return database.ManagedDB{}, fmt.Errorf("database: delete secret %s: %w", db.SecretName, secretErr)
+		}
 	}
 	if err := st.Databases.Delete(nameOrID, project); err != nil {
 		return database.ManagedDB{}, err

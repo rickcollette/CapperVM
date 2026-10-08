@@ -94,6 +94,9 @@ die()  { printf "${R}  ✗ %s${Z}\n" "$*" >&2; exit 1; }
 # Required deploy identity (no personal defaults checked into the repo).
 [ -n "$ACME_EMAIL" ] || die "ACME_EMAIL is required (export ACME_EMAIL=you@example.com)"
 [ -n "$DEPLOY_USER" ] || die "DEPLOY_USER is required (export DEPLOY_USER=…)"
+if [ "$SSO_ENABLED" = "1" ] && [ -z "$ALLOWED_DOMAINS" ]; then
+  die "ALLOWED_DOMAINS is required when OAuth SSO is enabled (comma-separated email domains)"
+fi
 
 # Connection multiplexing: route every ssh/scp through ONE TCP connection so a
 # fail2ban-style jail sees a single login instead of one per step (which can

@@ -81,6 +81,10 @@ func (s *Server) handleProtectTermination(w http.ResponseWriter, r *http.Request
 		return
 	}
 	inst.TerminationProtection = true
+	if err := s.ctrl.Store.WriteInstanceJSON(*inst); err != nil {
+		writeInternal(w, err)
+		return
+	}
 	_ = s.ctrl.Store.UpdateInstance(*inst)
 	writeData(w, inst, nil)
 }
@@ -97,6 +101,10 @@ func (s *Server) handleUnprotectTermination(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	inst.TerminationProtection = false
+	if err := s.ctrl.Store.WriteInstanceJSON(*inst); err != nil {
+		writeInternal(w, err)
+		return
+	}
 	_ = s.ctrl.Store.UpdateInstance(*inst)
 	writeData(w, inst, nil)
 }

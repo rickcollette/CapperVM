@@ -113,6 +113,17 @@ func TestResolveInstanceMergesInstanceJSON(t *testing.T) {
 	if !resolved.TerminationProtection {
 		t.Fatal("expected termination protection from instance.json")
 	}
+	inst.TerminationProtection = false
+	if err := st.WriteInstanceJSON(inst); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := st.ResolveInstance(inst.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.TerminationProtection {
+		t.Fatal("rewriting instance.json with protection disabled must clear it")
+	}
 }
 
 func TestListImagesResolvesRelativePathsAgainstStoreParent(t *testing.T) {

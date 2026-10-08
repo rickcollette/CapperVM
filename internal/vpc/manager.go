@@ -192,6 +192,11 @@ func (m *Manager) CreateSecurityGroup(vpcID, name, description string, defaultDe
 	return sg, nil
 }
 
+// GetSecurityGroupByID retrieves a security group by its ID.
+func (m *Manager) GetSecurityGroupByID(id string) (SecurityGroup, error) {
+	return m.store.GetSecurityGroupByID(id)
+}
+
 // GetSecurityGroup retrieves a security group by name or ID.
 func (m *Manager) GetSecurityGroup(nameOrID, vpcID string) (SecurityGroup, error) {
 	return m.store.GetSecurityGroup(nameOrID, vpcID)

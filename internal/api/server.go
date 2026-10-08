@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"capper/internal/control"
 	"capper/internal/compute"
+	"capper/internal/control"
 	"capper/internal/controller"
 	csdbackend "capper/internal/csd/backend"
 	csdserver "capper/internal/csd/server"
@@ -845,7 +845,12 @@ func (s *Server) staticHandler() http.Handler {
 	root := s.staticRoot
 	indexHTML := filepath.Join(root, "index.html")
 	serveIndex := func(w http.ResponseWriter, r *http.Request) {
-		f, err := os.Open(indexHTML)
+		resolved, ok := resolvedWithinRoot(root, indexHTML)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		f, err := os.Open(resolved)
 		if err != nil {
 			http.NotFound(w, r)
 			return
@@ -890,22 +895,59 @@ func (s *Server) staticHandler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		st, err := os.Stat(absFull)
-		if os.IsNotExist(err) {
-			serveIndex(w, r)
-			return
-		}
-		if err != nil {
+		if _, err := os.Lstat(absFull); err != nil {
+			if os.IsNotExist(err) {
+				serveIndex(w, r)
+				return
+			}
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		if st.IsDir() {
+		resolved, ok := resolvedWithinRoot(root, absFull)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		resolvedInfo, err := os.Stat(resolved)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if resolvedInfo.IsDir() {
 			// SPA fallback — never expose directory listings.
 			serveIndex(w, r)
 			return
 		}
-		http.ServeFile(w, r, absFull)
+		http.ServeFile(w, r, resolved)
 	})
+}
+
+// resolvedWithinRoot returns the symlink-resolved path when it stays inside root.
+func resolvedWithinRoot(root, candidate string) (string, bool) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	absCandidate, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", false
+	}
+	sep := string(os.PathSeparator)
+	if absCandidate != absRoot && !strings.HasPrefix(absCandidate, absRoot+sep) {
+		return "", false
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return "", false
+	}
+	resolved, err := filepath.EvalSymlinks(absCandidate)
+	if err != nil {
+		return "", false
+	}
+	if resolved != resolvedRoot && !strings.HasPrefix(resolved, resolvedRoot+sep) {
+		return "", false
+	}
+	return resolved, true
 }
 
 func (s *Server) recordEvent(r *http.Request, resourceType, resourceID, action string, data map[string]any) {

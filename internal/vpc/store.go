@@ -444,6 +444,20 @@ func (s *Store) InsertSecurityGroup(sg SecurityGroup) error {
 	return err
 }
 
+func (s *Store) GetSecurityGroupByID(id string) (SecurityGroup, error) {
+	var sg SecurityGroup
+	var deny int
+	err := s.db.QueryRow(
+		`SELECT id, vpc_id, name, description, default_deny, created_at FROM capvpc_security_groups WHERE id=?`,
+		id,
+	).Scan(&sg.ID, &sg.VPCID, &sg.Name, &sg.Description, &deny, &sg.CreatedAt)
+	if err == sql.ErrNoRows {
+		return sg, fmt.Errorf("security group %q not found", id)
+	}
+	sg.DefaultDeny = deny == 1
+	return sg, err
+}
+
 func (s *Store) GetSecurityGroup(nameOrID, vpcID string) (SecurityGroup, error) {
 	var sg SecurityGroup
 	var deny int

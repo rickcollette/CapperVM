@@ -48,6 +48,10 @@ say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 ok()  { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31m  ✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
+if [ "$SSO_ENABLED" = "1" ] && [ -z "$ALLOWED_DOMAINS" ]; then
+  die "ALLOWED_DOMAINS is required when OAuth SSO is enabled (comma-separated email domains)"
+fi
+
 # ── Dependencies ──────────────────────────────────────────────────────────────
 say "Installing OS dependencies"
 apt-get update -qq

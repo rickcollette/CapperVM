@@ -9,13 +9,13 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"gopkg.in/yaml.v3"
 	"math/big"
 	"time"
 )
@@ -52,7 +53,7 @@ type Config struct {
 			OutDir  string `yaml:"out_dir"`
 		} `yaml:"web"`
 		PDF struct {
-			Enabled bool `yaml:"enabled"`
+			Enabled bool   `yaml:"enabled"`
 			OutDir  string `yaml:"out_dir"`
 		} `yaml:"pdf"`
 	} `yaml:"outputs"`
@@ -1029,6 +1030,7 @@ func ephemeralLocalhostCert() (tls.Certificate, error) {
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
