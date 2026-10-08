@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"capper/internal/vpc"
@@ -50,6 +51,23 @@ func (s *Server) handleCreateENI(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeBadRequest(w, err)
+		return
+	}
+	if req.VPCID == "" {
+		writeBadRequest(w, fmt.Errorf("vpcId is required"))
+		return
+	}
+	if req.SubnetID == "" {
+		writeBadRequest(w, fmt.Errorf("subnetId is required"))
+		return
+	}
+	sub, serr := s.ctrl.Store.VPC.GetSubnetByID(req.SubnetID)
+	if serr != nil {
+		writeBadRequest(w, fmt.Errorf("subnet not found: %w", serr))
+		return
+	}
+	if sub.VPCID != req.VPCID {
+		writeBadRequest(w, fmt.Errorf("subnet %s is not in vpc %s", req.SubnetID, req.VPCID))
 		return
 	}
 	eni, err := s.ctrl.Store.VPC.CreateENI(req.VPCID, req.SubnetID, req.SGIDs, req.PrivateIP)

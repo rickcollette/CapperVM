@@ -3,8 +3,7 @@ package network
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
-	"time"
+	"errors"
 )
 
 // Manager provides the high-level network lifecycle operations.
@@ -24,63 +23,16 @@ type CreateOptions struct {
 	Labels map[string]string
 }
 
-// Create provisions a new network: allocates a bridge, configures the OS,
-// and records the network in the store.
+// ErrFlatNetworksRemoved is returned by Manager.Create: user-facing flat
+// networks no longer exist; callers must create a VPC subnet instead. The
+// bridge/IPAM/TAP helpers in this package remain for the VPC dataplane.
+var ErrFlatNetworksRemoved = errors.New("flat networks removed; create a VPC subnet")
+
+// Create is retained for API compatibility but always fails: flat networks have
+// been removed in favour of VPC subnets. List/Get/Inspect keep working for any
+// leftover rows.
 func (m *Manager) Create(name, project string, opts CreateOptions) (Network, error) {
-	subnet := opts.Subnet
-	if subnet == "" {
-		subnet = "10.42.0.0/24"
-	}
-	mode := opts.Mode
-	if mode == "" {
-		mode = ModeNAT
-	}
-	if mode != ModeNAT && mode != ModeIsolated && mode != ModeHostExposed {
-		return Network{}, fmt.Errorf("invalid network mode %q (valid: nat, isolated, host-exposed)", mode)
-	}
-
-	gateway, err := GatewayForSubnet(subnet)
-	if err != nil {
-		return Network{}, err
-	}
-	bridge := BridgeName(name)
-
-	n := Network{
-		ID:        newNetID(),
-		Name:      name,
-		Project:   project,
-		Mode:      mode,
-		Subnet:    subnet,
-		Gateway:   gateway,
-		Bridge:    bridge,
-		Labels:    opts.Labels,
-		Status:    StatusPending,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-	}
-
-	if err := m.store.Insert(n); err != nil {
-		return Network{}, fmt.Errorf("network: store: %w", err)
-	}
-
-	if err := CreateBridge(bridge, gateway, subnet, mode); err != nil {
-		_ = m.store.UpdateStatusError(n.ID, "error", err.Error())
-		n.Status = "error"
-		n.Error = err.Error()
-		return n, nil
-	}
-
-	// Install the DNAT rule that redirects 169.254.169.254:80 → gateway:80 so
-	// instances can reach the per-network metadata server via the link-local address.
-	if err := AddMetadataDNAT(bridge, gateway); err != nil {
-		_ = m.store.UpdateStatusError(n.ID, "error", err.Error())
-		n.Status = "error"
-		n.Error = err.Error()
-		return n, nil
-	}
-
-	_ = m.store.UpdateStatus(n.ID, StatusActive)
-	n.Status = StatusActive
-	return n, nil
+	return Network{}, ErrFlatNetworksRemoved
 }
 
 // Delete removes the OS bridge and the store record.

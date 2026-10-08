@@ -47,6 +47,15 @@ See [All routes](routes.md) for the full list.
 ## DNS scoping
 
 When creating zones or records with `networkId`, the value must be a **subnet ID**.
+Private zones (`type` empty or `private`) **require** `networkId`.
+
+## Other placement requirements
+
+- `POST /databases` requires `subnetId` (optional `vpcId`; legacy `networkId` is accepted as an alias for `subnetId`).
+- `POST /stacks` requires `subnetId` on every instance and load balancer; `networks[]` and legacy `network` fields are rejected.
+- `POST /network-interfaces` requires `vpcId` and `subnetId`; `POST /nat-gateways` requires `vpcId` and `subnetId`. The subnet must belong to the VPC.
+- `POST /firewalls` `network`, when set, must be a VPC subnet ID.
+- `GET /search` returns `vpc` and `subnet` results (`type=vpcs,subnets`).
 
 ## Related
 

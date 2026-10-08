@@ -72,7 +72,7 @@ Run `capper <command> --help` for the same information at the terminal. Global p
 - [`mcp`](#capper-mcp) — manage MCP servers
 - [`metrics`](#capper-metrics) — resource metrics
 - [`nat`](#capper-nat) — manage NAT gateways
-- [`network`](#capper-network) — manage virtual networks
+- [`network`](#capper-network) — removed: flat virtual networks (use VPC subnets)
 - [`node`](#capper-node) — manage topology nodes
 - [`org`](#capper-org) — manage organizations and accounts
 - [`placement`](#capper-placement) — manage placement policies
@@ -1132,9 +1132,11 @@ capper db create NAME [flags]
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--engine` | — | database engine: postgres, redis, mariadb, or capdb (required) |
-| `--network` | — | attach to virtual network (name or ID) |
+| `--network` | — | removed: use --subnet-id |
 | `--port` | — | database port (optional) |
+| `--subnet-id` | — | VPC subnet ID to place the database in (required) |
 | `--version` | — | engine version (optional) |
+| `--vpc-id` | — | VPC ID (optional; must match the subnet) |
 
 ### `capper db delete`
 
@@ -1350,6 +1352,7 @@ capper dns zone create NAME [flags]
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--description` | — | zone description |
+| `--subnet-id` | — | VPC subnet ID the private zone is attached to (required) |
 | `--ttl` | `30` | default TTL for records in this zone |
 
 #### `capper dns zone delete`
@@ -2779,77 +2782,20 @@ capper nat list [flags]
 
 ## `capper network`
 
-manage virtual networks
+removed: flat virtual networks (use VPC subnets)
+
+Flat virtual networks have been removed.
+
+flat networks have been removed; create a VPC and subnet instead (CapperWeb, the VPC/Subnets API, or `capper vpc`), then pass --subnet-id to `capper run`, `capper db create`, and `capper dns zone create`
+
+```text
+capper network
+```
 
 Example:
 
 ```bash
-capper network create app-net --mode nat --subnet 10.42.0.0/24 --dns
-```
-
-**Subcommands:** `connect` · `create` · `delete` · `disconnect` · `inspect` · `list`
-
-### `capper network connect`
-
-attach an instance to a network
-
-```text
-capper network connect INSTANCE [flags]
-```
-
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--ip` | — | preferred IP address |
-| `--network` | — | network name or ID (required) |
-
-### `capper network create`
-
-create a virtual network
-
-```text
-capper network create NAME [flags]
-```
-
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--dns` | — | auto-create a .cap DNS zone with gateway and dns records |
-| `--mode` | `nat` | network mode: nat, isolated, host-exposed |
-| `--subnet` | `10.42.0.0/24` | subnet CIDR for the network |
-
-### `capper network delete`
-
-delete a virtual network
-
-```text
-capper network delete NAME
-```
-
-### `capper network disconnect`
-
-detach an instance from a network
-
-```text
-capper network disconnect INSTANCE [flags]
-```
-
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--network` | — | network name or ID (required) |
-
-### `capper network inspect`
-
-show network details and active leases
-
-```text
-capper network inspect NAME
-```
-
-### `capper network list`
-
-list virtual networks
-
-```text
-capper network list
+capper vpc create prod --cidr 10.0.0.0/16 --home-region local
 ```
 
 ## `capper node`
@@ -3696,7 +3642,7 @@ capper run IMAGE_NAME.cap [flags]
 Example:
 
 ```bash
-capper run web.cap --name web-1 --memory 512M --network app-net \
+capper run web.cap --name web-1 --memory 512M --subnet-id <subnet-id> \
   --publish 0.0.0.0:8080:8080/tcp --restart on-failure
 ```
 
@@ -3709,15 +3655,18 @@ capper run web.cap --name web-1 --memory 512M --network app-net \
 | `--memory` | — | limit virtual memory/address space, e.g. 128M, 1G |
 | `--mount` | — | bind mount in SOURCE:TARGET[:ro] format, repeatable |
 | `--name` | — | assign a name to the instance |
-| `--network` | — | attach instance to a virtual network (name or ID) |
+| `--network` | — | removed: use --subnet-id |
 | `--override-scan` | — | skip scan status check and run even if image has critical findings |
 | `--pids` | — | limit number of processes for the capsule user |
 | `--publish` | — | publish a container port as HOST:CONTAINER[/proto], repeatable |
 | `--require-signature` | — | refuse to run if the image is not signed |
 | `--restart` | — | restart policy: never, always, or on-failure |
 | `--rm` | — | remove instance automatically after it stops |
+| `--runtime-mode` | — | per-instance runtime override: auto, bwrap, chroot, crun, runc, lxc, or qemu |
 | `--secret` | — | inject a secret as an env var: SECRET_NAME[=ENV_VAR], repeatable |
+| `--subnet-id` | — | VPC subnet ID to place the instance in (required) |
 | `--trusted-key` | — | path to trusted public key; implies --require-signature |
+| `--vpc-id` | — | VPC ID (optional; must match the subnet) |
 
 ## `capper schedule`
 

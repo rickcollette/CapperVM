@@ -10,12 +10,20 @@ import (
 )
 
 // CreateManagedDatabase registers a managed DB, stores its password secret, and
-// launches the hidden alpine instance that runs the engine.
-func CreateManagedDatabase(st *store.Store, im InstanceManager, meta *metadata.Manager, name, project, engine, version, networkID string, port int) (database.ManagedDB, error) {
+// launches the hidden alpine instance that runs the engine. subnetID is the VPC
+// subnet the engine instance is placed in; netOpts carries the resolved
+// dataplane attachment (bridge, CIDR, gateway, preferred IP) and is required.
+func CreateManagedDatabase(st *store.Store, im InstanceManager, meta *metadata.Manager, name, project, engine, version, subnetID string, port int, netOpts *NetworkRunOpts) (database.ManagedDB, error) {
+	if subnetID == "" {
+		return database.ManagedDB{}, fmt.Errorf("database: subnetId is required")
+	}
+	if netOpts == nil {
+		return database.ManagedDB{}, fmt.Errorf("database: network placement is required")
+	}
 	if err := st.CheckHostDeployLimit(); err != nil {
 		return database.ManagedDB{}, err
 	}
-	db, password, err := st.Databases.Create(name, project, engine, version, networkID, port)
+	db, password, err := st.Databases.Create(name, project, engine, version, subnetID, port)
 	if err != nil {
 		return database.ManagedDB{}, err
 	}
@@ -23,7 +31,7 @@ func CreateManagedDatabase(st *store.Store, im InstanceManager, meta *metadata.M
 		_ = st.Databases.Delete(db.Name, project)
 		return database.ManagedDB{}, fmt.Errorf("database: store password secret: %w", err)
 	}
-	instanceID, err := im.ProvisionDatabase(meta, db, project, password, "alpine")
+	instanceID, err := im.ProvisionDatabase(meta, db, project, password, "alpine", netOpts)
 	if err != nil {
 		_ = st.Secrets.Delete(db.SecretName, project)
 		_ = st.Databases.Delete(db.Name, project)

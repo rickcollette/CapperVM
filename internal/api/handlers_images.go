@@ -15,6 +15,7 @@ import (
 
 	"capper/internal/compute"
 	"capper/internal/loader"
+	"capper/internal/storagepolicy"
 	"capper/internal/types"
 )
 
@@ -173,6 +174,10 @@ func (s *Server) handleDeleteCapsuleType(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleImportImage(w http.ResponseWriter, r *http.Request) {
 	if err := s.authorize(r, "image:create", "project:"+s.project); err != nil {
 		writeForbidden(w, err)
+		return
+	}
+	if _, err := storagepolicy.RequireDefaultPool(s.ctrl.Store.AdminConfig, s.ctrl.Store.HostStorage); err != nil {
+		writeBadRequest(w, err)
 		return
 	}
 	var req struct {

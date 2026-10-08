@@ -12,7 +12,11 @@ import (
 )
 
 // ProvisionDatabase launches a hidden alpine instance running the requested engine.
-func (m InstanceManager) ProvisionDatabase(meta *metadata.Manager, db database.ManagedDB, project, password, image string) (string, error) {
+// netOpts places the instance on a VPC subnet; it must be non-nil.
+func (m InstanceManager) ProvisionDatabase(meta *metadata.Manager, db database.ManagedDB, project, password, image string, netOpts *NetworkRunOpts) (string, error) {
+	if netOpts == nil {
+		return "", fmt.Errorf("database: network placement is required")
+	}
 	if err := m.Store.CheckHostDeployLimit(); err != nil {
 		return "", err
 	}
@@ -51,6 +55,7 @@ func (m InstanceManager) ProvisionDatabase(meta *metadata.Manager, db database.M
 		Env:        env,
 		Entrypoint: entrypoint,
 		Args:       args,
+		Network:    netOpts,
 	})
 	if err != nil {
 		return "", fmt.Errorf("database: launch instance: %w", err)

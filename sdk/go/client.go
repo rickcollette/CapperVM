@@ -284,12 +284,7 @@ type Network struct {
 }
 
 func (a *NetworksAPI) List(ctx context.Context, project string) ([]Network, error) {
-	path := "networks"
-	if project != "" {
-		path += "?project=" + url.QueryEscape(project)
-	}
-	var out struct{ Data []Network `json:"data"` }
-	return out.Data, a.c.get(ctx, path, &out)
+	return nil, fmt.Errorf("networks API removed; list VPCs and subnets via the VPCs/Subnets APIs")
 }
 
 // ---- Images -----------------------------------------------------------------
@@ -447,9 +442,12 @@ type DNSRecord struct {
 	TTL    int      `json:"ttl"`
 }
 
-func (a *DNSAPI) CreateZone(ctx context.Context, name string) (DNSZone, error) {
+// CreateZone creates a private hosted zone attached to a VPC subnet. subnetID is
+// sent as networkId (DNS networkId means VPC subnet ID) and is required.
+func (a *DNSAPI) CreateZone(ctx context.Context, name, subnetID string) (DNSZone, error) {
 	var out struct{ Data DNSZone `json:"data"` }
-	return out.Data, a.c.post(ctx, "dns/zones", map[string]string{"name": name}, &out)
+	body := map[string]string{"name": name, "networkId": subnetID}
+	return out.Data, a.c.post(ctx, "dns/zones", body, &out)
 }
 
 func (a *DNSAPI) DeleteZone(ctx context.Context, name string) error {

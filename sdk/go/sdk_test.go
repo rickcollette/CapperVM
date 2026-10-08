@@ -270,50 +270,19 @@ func TestVPCSubnetBootstrap(t *testing.T) {
 	}
 }
 
-// ---- Network lifecycle (removed) ----------------------------------------------
+// ---- Flat networks API (removed) -----------------------------------------------
 
-func TestNetworkLifecycle(t *testing.T) {
-	t.Skip("legacy /api/v1/networks API removed — use VPC subnets")
+func TestFlatNetworksAPIRemoved(t *testing.T) {
 	c := newTestServer(t)
 
-	// Create
-	net, err := c.Networks.Create(ctx, "default", cappersdk.CreateNetworkRequest{
-		Name:   "test-net",
-		Subnet: "10.99.0.0/24",
-	})
-	if err != nil {
-		t.Fatalf("Networks.Create: %v", err)
+	if _, err := c.Networks.Create(ctx, "default", cappersdk.CreateNetworkRequest{Name: "test-net", Subnet: "10.99.0.0/24"}); err == nil {
+		t.Error("Networks.Create: expected removal error")
 	}
-	if net.Name != "test-net" {
-		t.Errorf("Name: got %q, want %q", net.Name, "test-net")
+	if _, err := c.Networks.List(ctx, "default"); err == nil {
+		t.Error("Networks.List: expected removal error")
 	}
-
-	// List — must include created network
-	list, err := c.Networks.List(ctx, "default")
-	if err != nil {
-		t.Fatalf("Networks.List: %v", err)
-	}
-	found := false
-	for _, n := range list {
-		if n.Name == "test-net" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("network test-net not found in list")
-	}
-
-	// Delete
-	if err := c.Networks.Delete(ctx, "test-net"); err != nil {
-		t.Fatalf("Networks.Delete: %v", err)
-	}
-
-	// List after delete — must not include deleted network
-	list2, _ := c.Networks.List(ctx, "default")
-	for _, n := range list2 {
-		if n.Name == "test-net" {
-			t.Error("deleted network still appears in list")
-		}
+	if err := c.Networks.Delete(ctx, "test-net"); err == nil {
+		t.Error("Networks.Delete: expected removal error")
 	}
 }
 
@@ -343,10 +312,17 @@ func TestImageLifecycle(t *testing.T) {
 // ---- DNS lifecycle -----------------------------------------------------------
 
 func TestDNSLifecycle(t *testing.T) {
-	c := newTestServer(t)
+	env := newTestEnv(t)
+	c := env.Client
+	subnetID := bootstrapLaunchPrereqs(t, env)
+
+	// Private zones require a VPC subnet.
+	if _, err := c.DNS.CreateZone(ctx, "nosubnet.example.com", ""); err == nil {
+		t.Fatal("DNS.CreateZone without subnet: expected error")
+	}
 
 	// Create zone
-	zone, err := c.DNS.CreateZone(ctx, "example.com")
+	zone, err := c.DNS.CreateZone(ctx, "example.com", subnetID)
 	if err != nil {
 		t.Fatalf("DNS.CreateZone: %v", err)
 	}

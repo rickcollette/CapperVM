@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -742,9 +743,26 @@ func (s *Server) handleCreateNATGateway(w http.ResponseWriter, r *http.Request) 
 		writeBadRequest(w, err)
 		return
 	}
+	if req.VPCID == "" {
+		writeBadRequest(w, fmt.Errorf("vpcId is required"))
+		return
+	}
+	if req.SubnetID == "" {
+		writeBadRequest(w, fmt.Errorf("subnetId is required"))
+		return
+	}
 	v, err := s.netSvc().GetVPC(s.project, req.VPCID)
 	if err != nil {
 		writeNotFound(w, "vpc not found")
+		return
+	}
+	sub, serr := s.ctrl.Store.VPC.GetSubnetByID(req.SubnetID)
+	if serr != nil {
+		writeBadRequest(w, fmt.Errorf("subnet not found: %w", serr))
+		return
+	}
+	if sub.VPCID != v.ID {
+		writeBadRequest(w, fmt.Errorf("subnet %s is not in vpc %s", req.SubnetID, v.ID))
 		return
 	}
 	nat, err := s.ctrl.Store.VPC.CreateNATGateway(v.ID, req.SubnetID, req.Name, req.PublicIP)
