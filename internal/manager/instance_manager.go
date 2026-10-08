@@ -345,6 +345,9 @@ func (m InstanceManager) Remove(ref string) error {
 	if err := m.Refresh(inst); err != nil {
 		return err
 	}
+if inst.TerminationProtection {
+		return fmt.Errorf("instance has termination protection enabled")
+	}
 	if inst.Status == types.StatusRunning {
 		return fmt.Errorf("cannot remove running instance: stop it first")
 	}
